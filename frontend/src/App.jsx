@@ -2978,7 +2978,7 @@ export default function App() {
     setHistoryLoading(true);
     setHistoryError("");
     try {
-      const res = await API.get("/submissions/my-history");
+      const res = await API.get("/api/submissions/my-history");
       setMyHistory(res.data);
     } catch (err) {
       setHistoryError(err.response?.data?.message || "Failed to load exam history.");
