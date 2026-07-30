@@ -2943,7 +2943,7 @@ export default function App() {
   };
   const fetchAvailableExams = async () => {
     try {
-      const res = await API.get("/exams/available");
+      const res = await API.get("/api/exams/available");
       if (res.data?.length > 0) setActiveExam(res.data[0]);
     } catch { /* silent — exam card shows fallback */ }
   };
@@ -2965,7 +2965,7 @@ export default function App() {
     setStatsLoading(true);
     setStatsError("");
     try {
-      const res = await API.get("/exams/instructor/dashboard");
+      const res = await API.get("/addexams/instructor/dashboard");
       setDashboardStats(res.data);
     } catch (err) {
       setStatsError(err.response?.data?.message || "Failed to load dashboard stats.");
