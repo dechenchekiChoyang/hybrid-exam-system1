@@ -18,11 +18,11 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
       <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-slate-900 font-bold text-base shadow-lg shadow-cyan-500/20">
-              EC
-            </div>
+            {/* <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-slate-900 font-bold text-base shadow-lg shadow-cyan-500/20">
+              RHE
+            </div> */}
             <span className="font-bold text-lg text-slate-900 tracking-tight">
-              ExamCore
+              Hybrid Examination Portal
             </span>
           </div>
 
@@ -270,9 +270,9 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
           
           {/* Brand Info */}
           <div className="space-y-2">
-            <h4 className="text-lg font-bold text-slate-900">ExamCore ERP</h4>
+            <h4 className="text-lg font-bold text-slate-900">Hybrid Examination Portal</h4>
             <p className="text-slate-500 text-xs">
-              © 2026 ExamCore ERP. Next-Generation Assessment Infrastructure.
+              © 2026 Hybrid Examination Portal. Next-Generation Assessment Infrastructure.
             </p>
           </div>
 
