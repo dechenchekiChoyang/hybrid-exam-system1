@@ -53,6 +53,19 @@ router.get('/', verifyJWT, authorizeRoles('instructor', 'admin'), async (req, re
   }
 });
 
+// GET /api/exams/available — student-facing: list published exams (basic info only, no answers)
+router.get('/available', verifyJWT, authorizeRoles('student'), async (req, res, next) => {
+  try {
+    const exams = await Exam.find({ isPublished: true })
+      .select('title subject description instructions durationMinutes passingMarks questionPool maxTabSwitchViolations createdAt')
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json(exams);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/exams/instructor/dashboard — faculty dashboard statistics
 router.get('/instructor/dashboard', verifyJWT, authorizeRoles('instructor', 'admin'), async (req, res, next) => {
   try {

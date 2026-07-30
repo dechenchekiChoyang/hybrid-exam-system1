@@ -396,4 +396,66 @@ router.get('/:submissionId/result', verifyJWT, authorizeRoles('student'), async 
   }
 });
 
+/* ----------------------------------------------------------
+   GET /api/submissions/:submissionId/marksheet
+   Student: returns populated data for PDF marksheet generation.
+   Requires published status + ownership.
+---------------------------------------------------------- */
+router.get('/:submissionId/marksheet', verifyJWT, authorizeRoles('student'), async (req, res, next) => {
+  try {
+    const submission = await Submission.findById(req.params.submissionId)
+      .populate('student', 'fullName email department enrollmentId role')
+      .populate('exam', 'title subject durationMinutes passingMarks')
+      .lean();
+
+    if (!submission || submission.student._id.toString() !== req.user.id) {
+      return res.status(404).json({ message: 'Submission not found.' });
+    }
+    if (submission.status !== 'published') {
+      return res.status(403).json({ message: 'Marksheet is available only after the result is published.' });
+    }
+
+    const totalMarks = submission.autoPossible + (submission.manualPossible || 0);
+    const percentage = totalMarks > 0 ? Math.round((submission.finalScore / totalMarks) * 100) : 0;
+    const passed = submission.finalScore >= (submission.exam?.passingMarks || 0);
+
+    let grade = 'F';
+    if (passed) {
+      if (percentage >= 90) grade = 'O';
+      else if (percentage >= 80) grade = 'A+';
+      else if (percentage >= 70) grade = 'A';
+      else if (percentage >= 60) grade = 'B+';
+      else if (percentage >= 50) grade = 'B';
+      else grade = 'C';
+    }
+
+    res.json({
+      student: {
+        fullName: submission.student.fullName,
+        email: submission.student.email,
+        department: submission.student.department,
+        enrollmentId: submission.student.enrollmentId,
+        role: submission.student.role,
+      },
+      exam: {
+        title: submission.exam.title,
+        subject: submission.exam.subject,
+        durationMinutes: submission.exam.durationMinutes,
+        passingMarks: submission.exam.passingMarks,
+      },
+      result: {
+        finalScore: submission.finalScore,
+        totalMarks,
+        percentage,
+        grade,
+        passed,
+        publishedAt: submission.publishedAt,
+        status: submission.status,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
