@@ -2965,7 +2965,7 @@ export default function App() {
     setStatsLoading(true);
     setStatsError("");
     try {
-      const res = await API.get("/addexams/instructor/dashboard");
+      const res = await API.get("/api/instructor/dashboard");
       setDashboardStats(res.data);
     } catch (err) {
       setStatsError(err.response?.data?.message || "Failed to load dashboard stats.");
