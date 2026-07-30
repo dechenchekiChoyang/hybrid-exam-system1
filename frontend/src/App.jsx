@@ -2994,7 +2994,7 @@ export default function App() {
       const params = new URLSearchParams();
       if (userRoleFilter) params.set("role", userRoleFilter);
       if (userSearch.trim()) params.set("search", userSearch.trim());
-      const res = await API.get(`/admin/users?${params.toString()}`);
+      const res = await API.get(`/api/admin/users?${params.toString()}`);
       setAllUsers(res.data);
     } catch (err) {
       setUsersError(err.response?.data?.message || "Failed to load users.");
@@ -3005,7 +3005,7 @@ export default function App() {
 
   const handleToggleUserStatus = async (userId, currentActive) => {
     try {
-      await API.patch(`/admin/users/${userId}/status`, { active: !currentActive });
+      await API.patch(`/api/admin/users/${userId}/status`, { active: !currentActive });
       await fetchUsers();
     } catch (err) {
       alert(err.response?.data?.message || "Failed to update user status.");
@@ -3015,7 +3015,7 @@ export default function App() {
   const handleUpdateUser = async (userId, formData) => {
     setUserEditSaving(true);
     try {
-      await API.put(`/admin/users/${userId}`, formData);
+      await API.put(`/api/admin/users/${userId}`, formData);
       setUserEditModal({ open: false, user: null });
       await fetchUsers();
     } catch (err) {
