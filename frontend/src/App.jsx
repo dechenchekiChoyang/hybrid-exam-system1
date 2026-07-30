@@ -3134,7 +3134,7 @@ export default function App() {
 
   const handlePublishExam = async (examId) => {
     try {
-      await API.patch(`/exams/${examId}/publish`);
+      await API.patch(`/api/exams/${examId}/publish`);
       await fetchExams();
     } catch (err) {
       alert(err.response?.data?.message || "Failed to publish exam.");
