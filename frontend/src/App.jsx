@@ -165,6 +165,101 @@ function useCountdown(totalSeconds, active, onExpire) {
   return { secondsLeft, formatted: `${m}:${s}`, fraction: secondsLeft / totalSeconds };
 }
 
+// ── Server-side timer hook — backend is the authority ──
+function useServerCountdown(examId, fallbackSeconds, active, onExpire) {
+  const [secondsLeft, setSecondsLeft] = useState(null);
+  const [timerLoading, setTimerLoading] = useState(true);
+  const expiredRef = useRef(false);
+  const startedRef = useRef(false);
+  const lastSync = useRef(0);
+
+  // Initialize from server — try timer (resume) first, then start
+  useEffect(() => {
+    if (!active || startedRef.current) return;
+    startedRef.current = true;
+
+    const initFromServer = async () => {
+      try {
+        let res;
+        try {
+          res = await API.get(`/submissions/${examId}/timer`);
+          if (res.data?.status && res.data.status !== "in-progress") {
+            setSecondsLeft(0);
+            setTimerLoading(false);
+            if (!expiredRef.current) { expiredRef.current = true; onExpire?.(); }
+            return;
+          }
+          if (res.data?.startedAt) { lastSync.current = Date.now(); }
+        } catch {
+          res = await API.post(`/submissions/${examId}/start`);
+          lastSync.current = Date.now();
+        }
+
+        if (res?.data?.expired) {
+          setSecondsLeft(0);
+          if (!expiredRef.current) { expiredRef.current = true; onExpire?.(); }
+        } else {
+          setSecondsLeft(res?.data?.remainingSeconds ?? fallbackSeconds);
+        }
+      } catch {
+        // API unavailable — fall back to client-side timer
+        setSecondsLeft(fallbackSeconds);
+      } finally {
+        setTimerLoading(false);
+      }
+    };
+    initFromServer();
+  }, [active, examId, fallbackSeconds, onExpire]);
+
+  // Countdown tick + periodic server sync
+  useEffect(() => {
+    if (!active || secondsLeft === null) return;
+    if (secondsLeft <= 0) {
+      if (!expiredRef.current) { expiredRef.current = true; onExpire?.(); }
+      return;
+    }
+
+    const tickId = setInterval(() => {
+      setSecondsLeft((prev) => {
+        if (prev === null) return prev;
+        if (prev <= 1) {
+          clearInterval(tickId);
+          if (!expiredRef.current) { expiredRef.current = true; onExpire?.(); }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    // Sync with server every 30 seconds
+    const syncId = setInterval(async () => {
+      try {
+        const res = await API.get(`/submissions/${examId}/timer`);
+        if (res?.data && typeof res.data.remainingSeconds === "number") {
+          setSecondsLeft(res.data.remainingSeconds);
+          lastSync.current = Date.now();
+          if (res.data.expired && !expiredRef.current) {
+            expiredRef.current = true;
+            onExpire?.();
+          }
+        }
+      } catch { /* silent — keep local countdown */ }
+    }, 30000);
+
+    return () => { clearInterval(tickId); clearInterval(syncId); };
+  }, [active, secondsLeft !== null, examId, onExpire]);
+
+  const s = secondsLeft ?? fallbackSeconds;
+  const m = Math.floor(s / 60).toString().padStart(2, "0");
+  const secs = (s % 60).toString().padStart(2, "0");
+  return {
+    secondsLeft: s,
+    formatted: `${m}:${secs}`,
+    fraction: fallbackSeconds > 0 ? Math.max(0, Math.min(1, s / fallbackSeconds)) : 0,
+    loading: timerLoading,
+  };
+}
+
 function useTabSwitchDetector(active, maxViolations, onMaxExceeded) {
   const violationsRef = useRef(0);
   const [violations, setViolations] = useState(0);
@@ -746,6 +841,64 @@ function StudentRegisteredScreen({ name, onContinue }) {
 }
 
 /* ============================================================
+   HISTORY RESULT DETAIL VIEW
+   ============================================================ */
+function HistoryResultView({ result, onBack }) {
+  if (!result) return null;
+  const pct = result.totalMarks > 0 ? Math.round((result.finalScore / result.totalMarks) * 100) : null;
+  const passed = result.passingMarks != null ? result.finalScore >= result.passingMarks : null;
+
+  return (
+    <div className="w-full space-y-6 pb-12">
+      <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-900 text-white p-8 rounded-2xl shadow-lg">
+        <button onClick={onBack} className="text-blue-200 hover:text-white text-xs font-semibold mb-3 flex items-center gap-1">
+          ← Back to Results
+        </button>
+        <h1 className="text-3xl font-extrabold tracking-tight">Result Breakdown</h1>
+        <p className="text-blue-100 text-sm mt-1">Official Score Card</p>
+      </div>
+
+      <Card className="p-6 bg-white border-slate-200 flex items-center gap-6">
+        <div className="text-5xl">{pct != null && pct >= 75 ? "🏆" : pct != null && pct >= 50 ? "👍" : "📋"}</div>
+        <div className="flex-1">
+          <div className="font-bold text-lg text-slate-900">
+            {pct != null && pct >= 75 ? "Great Performance!" : pct != null && pct >= 50 ? "Satisfactory" : "Result"}
+          </div>
+          <div className="text-3xl font-extrabold font-mono text-blue-600 my-1">
+            {result.finalScore} / {result.totalMarks}
+            {pct != null && <span className="text-sm font-normal text-slate-500"> ({pct}%)</span>}
+          </div>
+          {passed !== null && (
+            <Badge color={passed ? COLORS.green : COLORS.red}>{passed ? "Passed" : "Failed"}</Badge>
+          )}
+          <div className="text-xs text-slate-500 mt-2">Passing Marks: {result.passingMarks}</div>
+        </div>
+      </Card>
+
+      {result.manualFeedback && result.manualFeedback.length > 0 && (
+        <>
+          <Eyebrow>Faculty Feedback</Eyebrow>
+          <div className="space-y-3">
+            {result.manualFeedback.map((fb, i) => (
+              <Card key={i} className="p-4 bg-white border-slate-200">
+                <div className="text-xs text-slate-500">
+                  <span className="font-semibold text-slate-700">Question:</span>{" "}
+                  {result.questions?.find((q) => q._id === fb.question)?.text || fb.question}
+                </div>
+                <div className="text-xs mt-2">
+                  <span className="font-bold text-slate-900">Marks: {fb.marks}</span>
+                  {fb.feedback && <span className="text-slate-600 ml-3 italic">"{fb.feedback}"</span>}
+                </div>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    STUDENT DASHBOARD (Full-Width Responsive Grid with Collapsible Sidebar)
    ============================================================ */
 function StudentDashboard({ user, submission, onStart, onViewResult, onLogout, activeTab, onSelectTab }) {
@@ -1049,7 +1202,7 @@ function ExamInterface({ onSubmit }) {
     onSubmit(answers, reason);
   }, [answers, onSubmit]);
 
-  const { formatted, fraction, secondsLeft } = useCountdown(MOCK_EXAM.durationMinutes * 60, !locked, () => finalize("auto-submitted — time expired"));
+  const { formatted, fraction, secondsLeft, loading: timerLoading } = useServerCountdown(MOCK_EXAM.examId, MOCK_EXAM.durationMinutes * 60, !locked, () => finalize("auto-submitted — time expired"));
   const { violations, banner, dismissBanner } = useTabSwitchDetector(!locked, MOCK_EXAM.maxTabSwitchViolations, () => finalize("auto-submitted — proctoring violation limit"));
 
   const currentQuestion = MOCK_EXAM.questions[currentIndex];
@@ -1071,9 +1224,10 @@ function ExamInterface({ onSubmit }) {
           <div className="font-bold text-slate-900 text-sm tracking-tight">{MOCK_EXAM.title}</div>
           <div className="text-xs text-slate-500 font-medium">
             {Object.keys(answeredMap).length} of {MOCK_EXAM.questions.length} Questions Answered
+            {timerLoading && <span className="ml-2 text-blue-600 font-semibold animate-pulse">Syncing timer…</span>}
           </div>
         </div>
-        <TimerRing fraction={fraction} formatted={formatted} danger={danger} />
+        <TimerRing fraction={fraction} formatted={timerLoading ? "…" : formatted} danger={danger} />
       </header>
 
       {banner === "warn" && (
@@ -1217,9 +1371,729 @@ function StudentResult({ submission, onBack }) {
 }
 
 /* ============================================================
+   QUESTION PAPERS — Instructor Exam CRUD
+   ============================================================ */
+function QuestionPapers({
+  exams,
+  loading,
+  error,
+  onRefresh,
+  onCreateClick,
+  onEditClick,
+  onDeleteClick,
+  questionsMap,
+  expandedExamId,
+  onToggleQuestions,
+  onAddQuestion,
+  onEditQuestion,
+  onDeleteQuestion,
+}) {
+  if (loading) {
+    return (
+      <div className="w-full space-y-6 pb-12">
+        <div className="bg-gradient-to-r from-emerald-800 via-teal-800 to-slate-900 text-white p-8 rounded-2xl shadow-lg">
+          <h1 className="text-3xl font-extrabold tracking-tight">Question Papers</h1>
+          <p className="text-emerald-100 text-sm mt-1">Loading examination records…</p>
+        </div>
+        <div className="flex items-center justify-center py-20">
+          <div className="text-slate-500 text-sm font-medium flex items-center gap-3">
+            <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Loading examination papers…
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="w-full space-y-6 pb-12">
+        <div className="bg-gradient-to-r from-emerald-800 via-teal-800 to-slate-900 text-white p-8 rounded-2xl shadow-lg">
+          <h1 className="text-3xl font-extrabold tracking-tight">Question Papers</h1>
+        </div>
+        <Card className="p-8 text-center bg-white border-slate-200">
+          <div className="text-4xl mb-4">⚠️</div>
+          <h2 className="text-lg font-bold text-slate-900 mb-2">Failed to Load Exams</h2>
+          <p className="text-sm text-slate-500 mb-6">{error}</p>
+          <Button onClick={onRefresh}>Retry</Button>
+        </Card>
+      </div>
+    );
+  }
+
+  if (exams.length === 0) {
+    return (
+      <div className="w-full space-y-6 pb-12">
+        <div className="bg-gradient-to-r from-emerald-800 via-teal-800 to-slate-900 text-white p-8 rounded-2xl shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-extrabold tracking-tight">Question Papers</h1>
+            <p className="text-emerald-100 text-sm mt-1">Manage examination papers</p>
+          </div>
+          <Button onClick={onCreateClick} className="bg-white hover:bg-slate-100 text-emerald-900 px-5 py-3 rounded-xl font-bold text-xs shadow-md">
+            + Create New Exam
+          </Button>
+        </div>
+        <Card className="p-12 text-center bg-white border-slate-200">
+          <div className="text-5xl mb-4">📄</div>
+          <h2 className="text-lg font-bold text-slate-900 mb-2">No Exams Yet</h2>
+          <p className="text-sm text-slate-500 mb-6">No examination papers have been created yet. Click the button above to create your first exam.</p>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-6 pb-12">
+      <div className="bg-gradient-to-r from-emerald-800 via-teal-800 to-slate-900 text-white p-8 rounded-2xl shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight">Question Papers</h1>
+          <p className="text-emerald-100 text-sm mt-1">{exams.length} examination paper{exams.length !== 1 ? "s" : ""} on record</p>
+        </div>
+        <Button onClick={onCreateClick} className="bg-white hover:bg-slate-100 text-emerald-900 px-5 py-3 rounded-xl font-bold text-xs shadow-md">
+          + Create New Exam
+        </Button>
+      </div>
+
+      <div className="grid gap-4">
+        {exams.map((exam) => (
+          <Card key={exam._id} className="p-6 bg-white border-slate-200 hover:border-blue-300 transition-all">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-3 mb-1 flex-wrap">
+                  <h2 className="text-lg font-bold text-slate-900">{exam.title}</h2>
+                  <Badge color={exam.isPublished ? COLORS.green : COLORS.gold}>
+                    {exam.isPublished ? "Published" : "Draft"}
+                  </Badge>
+                </div>
+                {exam.subject && (
+                  <p className="text-xs text-slate-500 font-medium mb-3">{exam.subject}</p>
+                )}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-700 font-medium">
+                  <div className="flex items-center gap-1.5">
+                    <Clock size={14} className="text-blue-600 shrink-0" />
+                    <span>{exam.durationMinutes} min</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Award size={14} className="text-blue-600 shrink-0" />
+                    <span>Pass: {exam.passingMarks}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <FileText size={14} className="text-blue-600 shrink-0" />
+                    <span>{exam.questionPool?.countToServe || 0} Qs</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Calendar size={14} className="text-blue-600 shrink-0" />
+                    <span>{new Date(exam.createdAt).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button variant="ghost" onClick={() => onToggleQuestions(exam._id)}>
+                  {expandedExamId === exam._id ? "Hide Questions" : "Questions"}
+                </Button>
+                <Button variant="ghost" onClick={() => onEditClick(exam)}>
+                  Edit
+                </Button>
+                <Button variant="danger" onClick={() => onDeleteClick(exam)}>
+                  Delete
+                </Button>
+              </div>
+            </div>
+
+            {/* Expandable Questions Section */}
+            {expandedExamId === exam._id && (
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    Questions ({exam.questionPool?.bank?.length || 0} in bank)
+                  </span>
+                  <Button variant="ghost" onClick={() => onAddQuestion(exam._id)}>
+                    + Add Question
+                  </Button>
+                </div>
+
+                {(() => {
+                  const entry = questionsMap[exam._id];
+                  if (!entry) {
+                    return (
+                      <div className="text-xs text-slate-400 text-center py-4">
+                        Click "Questions" to load.
+                      </div>
+                    );
+                  }
+                  if (entry.loading) {
+                    return (
+                      <div className="flex items-center justify-center py-4 gap-2 text-xs text-slate-500">
+                        <svg className="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        Loading questions…
+                      </div>
+                    );
+                  }
+                  if (entry.error) {
+                    return (
+                      <div className="text-xs text-red-600 text-center py-4">
+                        {entry.error} <button onClick={() => onToggleQuestions(exam._id)} className="underline font-semibold ml-1">Retry</button>
+                      </div>
+                    );
+                  }
+                  if (!entry.questions || entry.questions.length === 0) {
+                    return (
+                      <div className="text-xs text-slate-400 text-center py-6">
+                        No questions added yet. Click "+ Add Question" above.
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="space-y-2">
+                      {entry.questions.map((q, idx) => (
+                        <div key={q._id} className="flex items-start justify-between gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span className="font-mono font-bold text-slate-900">Q{idx + 1}.</span>
+                              <Badge color={q.type === "short_answer" ? COLORS.purple : q.type === "fill_blank" ? COLORS.gold : COLORS.accent}>
+                                {q.type === "mcq" ? "MCQ" : q.type === "true_false" ? "T/F" : q.type === "fill_blank" ? "Fill" : "Short"}
+                              </Badge>
+                              <span className="font-mono text-slate-500">{q.marks ?? q.maxMarks} pts</span>
+                            </div>
+                            <p className="text-slate-700 truncate">{q.text}</p>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={() => onEditQuestion(exam._id, q)}
+                              className="text-blue-600 hover:text-blue-800 font-semibold px-2 py-1 rounded hover:bg-blue-50 transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (window.confirm("Delete this question?")) {
+                                  onDeleteQuestion(exam._id, q._id);
+                                }
+                              }}
+                              className="text-red-600 hover:text-red-800 font-semibold px-2 py-1 rounded hover:bg-red-50 transition-colors"
+                            >
+                              Del
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   EXAM FORM MODAL — Create / Edit
+   ============================================================ */
+function ExamFormModal({ open, mode, exam, saving, onSave, onClose }) {
+  const [form, setForm] = useState({
+    title: "", subject: "", description: "", instructions: "",
+    durationMinutes: 60, passingMarks: 30, countToServe: 10,
+  });
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (mode === "edit" && exam) {
+      setForm({
+        title: exam.title || "",
+        subject: exam.subject || "",
+        description: exam.description || "",
+        instructions: exam.instructions || "",
+        durationMinutes: exam.durationMinutes || 60,
+        passingMarks: exam.passingMarks || 30,
+        countToServe: exam.questionPool?.countToServe || 10,
+      });
+    } else {
+      setForm({ title: "", subject: "", description: "", instructions: "", durationMinutes: 60, passingMarks: 30, countToServe: 10 });
+    }
+    setError("");
+  }, [open, mode, exam]);
+
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!form.title.trim()) { setError("Exam title is required."); return; }
+    if (!form.durationMinutes || form.durationMinutes < 1) { setError("Duration must be at least 1 minute."); return; }
+    if (form.passingMarks == null || form.passingMarks < 0) { setError("Passing marks must be 0 or more."); return; }
+    if (!form.countToServe || form.countToServe < 1) { setError("Questions to serve must be at least 1."); return; }
+    try {
+      await onSave(form);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className={`fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex justify-center items-center z-50 p-4 ${open ? "" : "hidden"}`}>
+      <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
+          <h2 className="text-lg font-bold text-slate-900">
+            {mode === "edit" ? "Edit Exam" : "Create New Exam"}
+          </h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl font-bold px-2 py-0.5 rounded">×</button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Exam Title *</label>
+            <input value={form.title} onChange={set("title")} placeholder="e.g. Computer Networks — Mid Semester" className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Subject</label>
+            <input value={form.subject} onChange={set("subject")} placeholder="e.g. Computer Networks" className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Description</label>
+            <textarea value={form.description} onChange={set("description")} rows={2} placeholder="Brief exam description…" className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all resize-none" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Instructions</label>
+            <textarea value={form.instructions} onChange={set("instructions")} rows={2} placeholder="Instructions for candidates…" className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all resize-none" />
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1">Duration (min) *</label>
+              <input type="number" min={1} value={form.durationMinutes} onChange={set("durationMinutes")} className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1">Passing Marks *</label>
+              <input type="number" min={0} value={form.passingMarks} onChange={set("passingMarks")} className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1">Questions to Serve *</label>
+              <input type="number" min={1} value={form.countToServe} onChange={set("countToServe")} className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all" />
+            </div>
+          </div>
+
+          {error && (
+            <div className="text-xs font-semibold text-red-600 bg-red-50 p-3 rounded-lg border border-red-200">{error}</div>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <Button type="button" variant="ghost" onClick={onClose} className="flex-1">Cancel</Button>
+            <Button type="submit" className="flex-1" disabled={saving}>
+              {saving ? "Saving…" : mode === "edit" ? "Update Exam" : "Create Exam"}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   QUESTION FORM MODAL — Create / Edit
+   ============================================================ */
+function QuestionFormModal({ open, mode, examId, question, saving, onSave, onClose }) {
+  const [form, setForm] = useState({
+    type: "mcq", text: "", difficulty: "medium", topic: "", explanation: "",
+    options: ["", ""], correctOptionIndex: 0, acceptedAnswers: "",
+    marks: 5, maxMarks: 10,
+  });
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (mode === "edit" && question) {
+      setForm({
+        type: question.type || "mcq",
+        text: question.text || "",
+        difficulty: question.difficulty || "medium",
+        topic: question.topic || "",
+        explanation: question.explanation || "",
+        options: question.options ? [...question.options] : ["", ""],
+        correctOptionIndex: question.correctOptionIndex ?? 0,
+        acceptedAnswers: question.acceptedAnswers ? question.acceptedAnswers.join(", ") : "",
+        marks: question.marks ?? 5,
+        maxMarks: question.maxMarks ?? 10,
+      });
+    } else {
+      setForm({
+        type: "mcq", text: "", difficulty: "medium", topic: "", explanation: "",
+        options: ["", ""], correctOptionIndex: 0, acceptedAnswers: "",
+        marks: 5, maxMarks: 10,
+      });
+    }
+    setError("");
+  }, [open, mode, question]);
+
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+  const setOption = (idx) => (e) => {
+    setForm((f) => {
+      const opts = [...f.options];
+      opts[idx] = e.target.value;
+      return { ...f, options: opts };
+    });
+  };
+  const addOption = () => setForm((f) => ({ ...f, options: [...f.options, ""] }));
+  const removeOption = (idx) => () => {
+    setForm((f) => {
+      const opts = f.options.filter((_, i) => i !== idx);
+      return { ...f, options: opts.length >= 2 ? opts : opts.concat([""]), correctOptionIndex: f.correctOptionIndex >= opts.length ? 0 : f.correctOptionIndex };
+    });
+  };
+
+  const isOptionType = form.type === "mcq" || form.type === "true_false";
+  const isFillType = form.type === "fill_blank";
+  const isManualType = form.type === "short_answer";
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!form.text.trim()) { setError("Question text is required."); return; }
+    if (isOptionType) {
+      if (form.options.filter((o) => o.trim()).length < 2) { setError("At least 2 non-empty options are required."); return; }
+      if (form.marks == null || form.marks < 0) { setError("Marks must be 0 or more."); return; }
+    }
+    if (isFillType) {
+      if (!form.acceptedAnswers.trim()) { setError("At least one accepted answer is required."); return; }
+      if (form.marks == null || form.marks < 0) { setError("Marks must be 0 or more."); return; }
+    }
+    if (isManualType) {
+      if (form.maxMarks == null || form.maxMarks <= 0) { setError("Max marks must be greater than 0."); return; }
+    }
+
+    const payload = {
+      type: form.type,
+      text: form.text.trim(),
+      difficulty: form.difficulty,
+      topic: form.topic.trim(),
+      explanation: form.explanation.trim(),
+    };
+
+    if (isOptionType) {
+      payload.options = form.options.map((o) => o.trim()).filter((o) => o);
+      payload.correctOptionIndex = form.correctOptionIndex;
+      payload.marks = Number(form.marks);
+    }
+    if (isFillType) {
+      payload.acceptedAnswers = form.acceptedAnswers.split(",").map((s) => s.trim()).filter((s) => s);
+      payload.marks = Number(form.marks);
+    }
+    if (isManualType) {
+      payload.maxMarks = Number(form.maxMarks);
+    }
+
+    try {
+      await onSave(payload);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className={`fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex justify-center items-center z-50 p-4 ${open ? "" : "hidden"}`}>
+      <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
+          <h2 className="text-lg font-bold text-slate-900">
+            {mode === "edit" ? "Edit Question" : "Add Question"}
+          </h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl font-bold px-2 py-0.5 rounded">×</button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Question Type */}
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Question Type *</label>
+            <select value={form.type} onChange={set("type")} className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all">
+              <option value="mcq">Multiple Choice (MCQ)</option>
+              <option value="true_false">True / False</option>
+              <option value="fill_blank">Fill in the Blank</option>
+              <option value="short_answer">Short Answer (Manual)</option>
+            </select>
+          </div>
+
+          {/* Question Text */}
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Question Text *</label>
+            <textarea value={form.text} onChange={set("text")} rows={3} placeholder="Enter the question…" className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all resize-none" />
+          </div>
+
+          {/* Options (MCQ / True/False) */}
+          {isOptionType && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-semibold text-slate-700">Options *</label>
+                {form.type === "mcq" && form.options.length < 6 && (
+                  <button type="button" onClick={addOption} className="text-xs text-blue-600 font-semibold hover:underline">+ Add Option</button>
+                )}
+              </div>
+              <div className="space-y-2">
+                {form.options.map((opt, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="correctOption"
+                      checked={form.correctOptionIndex === idx}
+                      onChange={() => setForm((f) => ({ ...f, correctOptionIndex: idx }))}
+                      className="shrink-0"
+                      title="Mark as correct answer"
+                    />
+                    <input
+                      value={opt}
+                      onChange={setOption(idx)}
+                      placeholder={`Option ${String.fromCharCode(65 + idx)}`}
+                      className="flex-1 rounded-lg px-3 py-2 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all"
+                    />
+                    {form.options.length > 2 && (
+                      <button type="button" onClick={removeOption(idx)} className="text-red-400 hover:text-red-600 text-lg font-bold px-1">×</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">Select the radio button next to the correct answer.</p>
+            </div>
+          )}
+
+          {/* Accepted Answers (Fill in Blank) */}
+          {isFillType && (
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1">Accepted Answers * (comma-separated)</label>
+              <input
+                value={form.acceptedAnswers}
+                onChange={set("acceptedAnswers")}
+                placeholder="e.g. dns, domain name system"
+                className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all font-mono"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Separate multiple accepted answers with commas.</p>
+            </div>
+          )}
+
+          {/* Marks / MaxMarks */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1">
+                {isManualType ? "Max Marks *" : "Marks *"}
+              </label>
+              <input
+                type="number"
+                min={0}
+                value={isManualType ? form.maxMarks : form.marks}
+                onChange={set(isManualType ? "maxMarks" : "marks")}
+                className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1">Difficulty</label>
+              <select value={form.difficulty} onChange={set("difficulty")} className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all">
+                <option value="easy">Easy</option>
+                <option value="medium">Medium</option>
+                <option value="hard">Hard</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Topic & Explanation */}
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Topic</label>
+            <input value={form.topic} onChange={set("topic")} placeholder="e.g. OSI Model" className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Explanation</label>
+            <textarea value={form.explanation} onChange={set("explanation")} rows={2} placeholder="Answer explanation (shown after grading)…" className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all resize-none" />
+          </div>
+
+          {error && (
+            <div className="text-xs font-semibold text-red-600 bg-red-50 p-3 rounded-lg border border-red-200">{error}</div>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <Button type="button" variant="ghost" onClick={onClose} className="flex-1">Cancel</Button>
+            <Button type="submit" className="flex-1" disabled={saving}>
+              {saving ? "Saving…" : mode === "edit" ? "Update Question" : "Add Question"}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   DELETE CONFIRMATION MODAL (EXAM)
+   ============================================================ */
+function DeleteConfirmModal({ open, examTitle, deleting, onConfirm, onClose }) {
+  return (
+    <div className={`fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex justify-center items-center z-50 p-4 ${open ? "" : "hidden"}`}>
+      <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+        <div className="text-center mb-6">
+          <div className="w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center text-2xl mx-auto mb-4">⚠️</div>
+          <h2 className="text-lg font-bold text-slate-900 mb-1">Delete Exam?</h2>
+          <p className="text-sm text-slate-500">
+            This will permanently delete <strong className="text-slate-900">"{examTitle}"</strong> and all its associated questions. This action cannot be undone.
+          </p>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="ghost" onClick={onClose} className="flex-1">Cancel</Button>
+          <Button variant="danger" onClick={onConfirm} disabled={deleting} className="flex-1">
+            {deleting ? "Deleting…" : "Delete Exam"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   STUDENT EXAM HISTORY
+   ============================================================ */
+function StudentExamHistory({ history, loading, error, onRetry, onViewResult }) {
+  if (loading) {
+    return (
+      <div className="w-full space-y-6 pb-12">
+        <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-900 text-white p-8 rounded-2xl shadow-lg">
+          <h1 className="text-3xl font-extrabold tracking-tight">Results & Transcripts</h1>
+          <p className="text-blue-100 text-sm mt-1">Loading your examination history…</p>
+        </div>
+        <div className="flex items-center justify-center py-20">
+          <div className="text-slate-500 text-sm font-medium flex items-center gap-3">
+            <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Loading examination records…
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="w-full space-y-6 pb-12">
+        <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-900 text-white p-8 rounded-2xl shadow-lg">
+          <h1 className="text-3xl font-extrabold tracking-tight">Results & Transcripts</h1>
+        </div>
+        <Card className="p-8 text-center bg-white border-slate-200">
+          <div className="text-4xl mb-4">⚠️</div>
+          <h2 className="text-lg font-bold text-slate-900 mb-2">Failed to Load History</h2>
+          <p className="text-sm text-slate-500 mb-6">{error}</p>
+          <Button onClick={onRetry}>Retry</Button>
+        </Card>
+      </div>
+    );
+  }
+
+  if (history.length === 0) {
+    return (
+      <div className="w-full space-y-6 pb-12">
+        <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-900 text-white p-8 rounded-2xl shadow-lg">
+          <h1 className="text-3xl font-extrabold tracking-tight">Results & Mark Sheet</h1>
+          <p className="text-blue-100 text-sm mt-1">Your official examination records</p>
+        </div>
+        <Card className="p-12 text-center bg-white border-slate-200">
+          <div className="text-5xl mb-4">📭</div>
+          <h2 className="text-lg font-bold text-slate-900 mb-2">No Exam History</h2>
+          <p className="text-sm text-slate-500 mb-2">You have not attempted any examinations yet.</p>
+          <p className="text-xs text-slate-400">Once you complete an exam and results are evaluated, they will appear here.</p>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-6 pb-12">
+      <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-900 text-white p-8 rounded-2xl shadow-lg">
+        <h1 className="text-3xl font-extrabold tracking-tight">Results & Mark Sheet</h1>
+        <p className="text-blue-100 text-sm mt-1">{history.length} examination record{history.length !== 1 ? "s" : ""} on file</p>
+      </div>
+
+      <div className="grid gap-4">
+        {history.map((entry) => {
+          const statusColors = {
+            "in-progress": { color: COLORS.gold, label: "In Progress" },
+            submitted: { color: COLORS.accent, label: "Under Evaluation" },
+            graded: { color: COLORS.purple, label: "Graded" },
+            published: { color: COLORS.green, label: "Published" },
+          };
+          const sc = statusColors[entry.status] || statusColors.submitted;
+          const pctColor =
+            entry.percentage == null
+              ? COLORS.textMuted
+              : entry.percentage >= 75
+              ? COLORS.green
+              : entry.percentage >= 50
+              ? COLORS.gold
+              : COLORS.red;
+
+          return (
+            <Card key={entry._id} className="p-6 bg-white border-slate-200 hover:border-blue-300 transition-all">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-1 flex-wrap">
+                    <h2 className="text-lg font-bold text-slate-900">{entry.title}</h2>
+                    <Badge color={sc.color}>{sc.label}</Badge>
+                    {entry.passed !== null && entry.status === "published" && (
+                      <Badge color={entry.passed ? COLORS.green : COLORS.red}>
+                        {entry.passed ? "Passed" : "Failed"}
+                      </Badge>
+                    )}
+                  </div>
+                  {entry.subject && (
+                    <p className="text-xs text-slate-500 font-medium mb-3">{entry.subject}</p>
+                  )}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-700 font-medium">
+                    <div className="flex items-center gap-1.5">
+                      <Calendar size={14} className="text-blue-600 shrink-0" />
+                      <span>{entry.submittedAt ? new Date(entry.submittedAt).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" }) : "—"}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Award size={14} className="text-blue-600 shrink-0" />
+                      <span>
+                        {entry.status === "published" ? `${entry.score}/${entry.totalMarks}` : "Pending"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <BarChart3 size={14} style={{ color: pctColor }} className="shrink-0" />
+                      <span style={{ color: pctColor }} className="font-bold">
+                        {entry.percentage != null ? `${entry.percentage}%` : "—"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <FileText size={14} className="text-blue-600 shrink-0" />
+                      <span>Pass: {entry.passingMarks ?? "—"}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {entry.status === "published" && (
+                    <Button variant="primary" onClick={() => onViewResult(entry._id)}>
+                      View Details
+                    </Button>
+                  )}
+                  {entry.status !== "published" && (
+                    <Button variant="ghost" disabled>
+                      Awaiting Results
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    INSTRUCTOR DASHBOARD
    ============================================================ */
-function InstructorDashboard({ user, submission, onOpenGrading, onLogout }) {
+function InstructorDashboard({ user, submission, stats, statsLoading, statsError, onRetryStats, onOpenGrading, onLogout }) {
   const manualQuestions = MOCK_EXAM.questions.filter((q) => MANUAL_TYPES.includes(q.type));
   const gradedCount = submission ? manualQuestions.filter((q) => submission.manualGrades[q._id]?.marks != null).length : 0;
   const pendingCount = submission ? manualQuestions.length - gradedCount : 0;
@@ -1240,12 +2114,37 @@ function InstructorDashboard({ user, submission, onOpenGrading, onLogout }) {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-        <StatCard label="Assigned Courses" value="3" icon="📖" accent="#059669" subtext="Active Papers" />
-        <StatCard label="Total Submissions" value={submission ? "1" : "0"} icon="📥" accent="#2563EB" subtext="Received Scripts" />
-        <StatCard label="Pending Manual Grading" value={pendingCount} icon="📝" accent={pendingCount > 0 ? "#D97706" : "#059669"} subtext="Needs Evaluation" />
-        <StatCard label="Results Status" value={submission?.status === "published" ? "Published" : "Draft"} icon="📢" accent="#7C3AED" subtext="Grade Sheet Status" />
-      </div>
+      {/* Stats Grid — live or loading */}
+      {statsError ? (
+        <Card className="p-6 text-center bg-white border-red-200">
+          <div className="text-3xl mb-2">⚠️</div>
+          <p className="text-sm text-red-600 mb-3">{statsError}</p>
+          <Button variant="ghost" onClick={onRetryStats}>Retry</Button>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          {statsLoading && !stats ? (
+            <>
+              {[...Array(6)].map((_, i) => (
+                <Card key={i} className="p-5 bg-white border-slate-200 animate-pulse">
+                  <div className="h-3 bg-slate-200 rounded w-20 mb-3" />
+                  <div className="h-8 bg-slate-200 rounded w-12 mb-1" />
+                  <div className="h-3 bg-slate-100 rounded w-24" />
+                </Card>
+              ))}
+            </>
+          ) : stats ? (
+            <>
+              <StatCard label="Total Exams" value={stats.totalExams} icon="📋" accent="#2563EB" subtext="All Papers" />
+              <StatCard label="Published" value={stats.publishedExams} icon="✅" accent="#16A34A" subtext="Live for Students" />
+              <StatCard label="Drafts" value={stats.draftExams} icon="📝" accent="#D97706" subtext="In Progress" />
+              <StatCard label="Total Questions" value={stats.totalQuestions} icon="❓" accent="#7C3AED" subtext="In Bank" />
+              <StatCard label="Pending Grading" value={stats.pendingManualGrading} icon="📥" accent={stats.pendingManualGrading > 0 ? "#DC2626" : "#16A34A"} subtext="Needs Review" />
+              <StatCard label="Submissions" value={stats.totalSubmissions} icon="📊" accent="#0891B2" subtext="Scripts Received" />
+            </>
+          ) : null}
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -1369,6 +2268,208 @@ function GradeRow({ question, index, value, answer, onSave }) {
 /* ============================================================
    ADMIN DASHBOARD
    ============================================================ */
+/* ============================================================
+   ADMIN USER MANAGEMENT
+   ============================================================ */
+function UserManagement({
+  users, loading, error, search, roleFilter,
+  onSearchChange, onRoleFilterChange, onRefresh,
+  onEdit, onToggleStatus, onDelete,
+}) {
+  return (
+    <div className="w-full space-y-6 pb-12">
+      <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white p-8 rounded-2xl shadow-lg">
+        <h1 className="text-3xl font-extrabold tracking-tight">User Registry</h1>
+        <p className="text-purple-100 text-sm mt-1">Manage all system users</p>
+      </div>
+
+      {/* Search & Filter Bar */}
+      <Card className="p-4 bg-white border-slate-200">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search size={16} className="absolute left-3.5 top-3 text-slate-400" />
+            <input
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="Search by name or email…"
+              className="w-full h-10 rounded-xl bg-slate-50 border border-slate-200 pl-10 pr-4 text-xs text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all"
+            />
+          </div>
+          <select
+            value={roleFilter}
+            onChange={(e) => onRoleFilterChange(e.target.value)}
+            className="h-10 rounded-xl px-3.5 text-xs bg-slate-50 border border-slate-200 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all"
+          >
+            <option value="">All Roles</option>
+            <option value="student">Students</option>
+            <option value="instructor">Instructors</option>
+            <option value="admin">Administrators</option>
+          </select>
+          <Button variant="ghost" onClick={onRefresh}>Refresh</Button>
+        </div>
+      </Card>
+
+      {/* Content */}
+      {loading ? (
+        <div className="flex items-center justify-center py-20 gap-3 text-sm text-slate-500">
+          <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          Loading users…
+        </div>
+      ) : error ? (
+        <Card className="p-8 text-center bg-white border-slate-200">
+          <div className="text-4xl mb-4">⚠️</div>
+          <h2 className="text-lg font-bold text-slate-900 mb-2">Failed to Load Users</h2>
+          <p className="text-sm text-slate-500 mb-6">{error}</p>
+          <Button onClick={onRefresh}>Retry</Button>
+        </Card>
+      ) : users.length === 0 ? (
+        <Card className="p-12 text-center bg-white border-slate-200">
+          <div className="text-5xl mb-4">👥</div>
+          <h2 className="text-lg font-bold text-slate-900 mb-2">No Users Found</h2>
+          <p className="text-sm text-slate-500">No users match your current filters.</p>
+        </Card>
+      ) : (
+        <Card className="bg-white border-slate-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-slate-50 text-slate-500 uppercase tracking-wider text-left">
+                  <th className="p-4 font-semibold">Name</th>
+                  <th className="p-4 font-semibold">Email</th>
+                  <th className="p-4 font-semibold">Role</th>
+                  <th className="p-4 font-semibold hidden md:table-cell">Department</th>
+                  <th className="p-4 font-semibold">Status</th>
+                  <th className="p-4 font-semibold hidden lg:table-cell">Created</th>
+                  <th className="p-4 font-semibold text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {users.map((u) => (
+                  <tr key={u._id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="p-4 font-semibold text-slate-900 whitespace-nowrap">{u.fullName}</td>
+                    <td className="p-4 text-slate-600 whitespace-nowrap">{u.email}</td>
+                    <td className="p-4">
+                      <Badge color={u.role === "admin" ? COLORS.purple : u.role === "instructor" ? COLORS.green : COLORS.accent}>
+                        {u.role}
+                      </Badge>
+                    </td>
+                    <td className="p-4 text-slate-600 hidden md:table-cell">{u.department || "—"}</td>
+                    <td className="p-4">
+                      <button
+                        onClick={() => onToggleStatus(u._id, u.isActive)}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors whitespace-nowrap ${
+                          u.isActive
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
+                            : "bg-red-50 text-red-700 border-red-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
+                        }`}
+                      >
+                        {u.isActive ? "Active" : "Disabled"}
+                      </button>
+                    </td>
+                    <td className="p-4 text-slate-500 hidden lg:table-cell whitespace-nowrap">
+                      {new Date(u.createdAt).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}
+                    </td>
+                    <td className="p-4 text-right whitespace-nowrap">
+                      <button onClick={() => onEdit(u)} className="text-blue-600 hover:text-blue-800 font-semibold px-2 py-1 rounded hover:bg-blue-50 transition-colors">Edit</button>
+                      <button onClick={() => onDelete(u._id, u.fullName)} className="text-red-600 hover:text-red-800 font-semibold px-2 py-1 rounded hover:bg-red-50 transition-colors ml-1">Del</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   USER EDIT MODAL
+   ============================================================ */
+function UserEditModal({ open, user, saving, onSave, onClose }) {
+  const [form, setForm] = useState({ fullName: "", email: "", role: "student", department: "", isActive: true });
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (open && user) {
+      setForm({
+        fullName: user.fullName || "",
+        email: user.email || "",
+        role: user.role || "student",
+        department: user.department || "",
+        isActive: user.isActive ?? true,
+      });
+    }
+    setError("");
+  }, [open, user]);
+
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!form.fullName.trim()) { setError("Name is required."); return; }
+    if (!form.email.trim()) { setError("Email is required."); return; }
+    try {
+      await onSave(form);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className={`fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex justify-center items-center z-50 p-4 ${open ? "" : "hidden"}`}>
+      <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 shadow-2xl">
+        <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
+          <h2 className="text-lg font-bold text-slate-900">Edit User</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl font-bold px-2 py-0.5 rounded">×</button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Full Name *</label>
+            <input value={form.fullName} onChange={set("fullName")} className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Email *</label>
+            <input value={form.email} onChange={set("email")} type="email" className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Role</label>
+            <select value={form.role} onChange={set("role")} className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all">
+              <option value="student">Student</option>
+              <option value="instructor">Instructor</option>
+              <option value="admin">Administrator</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Department</label>
+            <input value={form.department} onChange={set("department")} className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all" />
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="isActive" checked={form.isActive} onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))} className="rounded" />
+            <label htmlFor="isActive" className="text-xs font-semibold text-slate-700">Account Active</label>
+          </div>
+
+          {error && <div className="text-xs font-semibold text-red-600 bg-red-50 p-3 rounded-lg border border-red-200">{error}</div>}
+
+          <div className="flex gap-3 pt-2">
+            <Button type="button" variant="ghost" onClick={onClose} className="flex-1">Cancel</Button>
+            <Button type="submit" className="flex-1" disabled={saving}>{saving ? "Saving…" : "Save Changes"}</Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   ADMIN DASHBOARD
+   ============================================================ */
 function AdminDashboard({ user, submission, onLogout }) {
   const [staffForm, setStaffForm] = useState({ fullName: "", email: "", password: "", role: "instructor", department: "Computer Science" });
   const [msg, setMsg] = useState({ text: "", isError: false });
@@ -1409,13 +2510,6 @@ function AdminDashboard({ user, submission, onLogout }) {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-        <StatCard label="Total Candidates" value="1,280" icon="👨‍🎓" accent="#2563EB" subtext="Enrolled Students" />
-        <StatCard label="Faculty Members" value="48" icon="👨‍🏫" accent="#7C3AED" subtext="Instructors & Evaluation Staff" />
-        <StatCard label="Active Examinations" value="24" icon="📋" accent="#059669" subtext="Live Papers" />
-        <StatCard label="System Status" value="HEALTHY" icon="⚡" accent="#16A34A" subtext="99.9% Uptime" />
-      </div>
-
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <Eyebrow>Staff Account Provisioning Panel</Eyebrow>
@@ -1427,62 +2521,33 @@ function AdminDashboard({ user, submission, onLogout }) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-semibold text-slate-700 block mb-1">Full Name *</label>
-                  <input
-                    value={staffForm.fullName}
-                    onChange={(e) => setStaffForm({ ...staffForm, fullName: e.target.value })}
-                    placeholder="Dr. Jane Smith"
-                    className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none"
-                  />
+                  <input value={staffForm.fullName} onChange={(e) => setStaffForm({ ...staffForm, fullName: e.target.value })} placeholder="Dr. Jane Smith" className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none" />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-700 block mb-1">Email Address *</label>
-                  <input
-                    type="email"
-                    value={staffForm.email}
-                    onChange={(e) => setStaffForm({ ...staffForm, email: e.target.value })}
-                    placeholder="faculty@college.edu"
-                    className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none"
-                  />
+                  <input type="email" value={staffForm.email} onChange={(e) => setStaffForm({ ...staffForm, email: e.target.value })} placeholder="faculty@college.edu" className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none" />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-semibold text-slate-700 block mb-1">Initial Password *</label>
-                  <input
-                    type="password"
-                    value={staffForm.password}
-                    onChange={(e) => setStaffForm({ ...staffForm, password: e.target.value })}
-                    placeholder="••••••••"
-                    className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none"
-                  />
+                  <input type="password" value={staffForm.password} onChange={(e) => setStaffForm({ ...staffForm, password: e.target.value })} placeholder="••••••••" className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none" />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-700 block mb-1">Role Type *</label>
-                  <select
-                    value={staffForm.role}
-                    onChange={(e) => setStaffForm({ ...staffForm, role: e.target.value })}
-                    className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none"
-                  >
+                  <select value={staffForm.role} onChange={(e) => setStaffForm({ ...staffForm, role: e.target.value })} className="w-full rounded-lg px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 text-slate-900 outline-none">
                     <option value="instructor">Instructor / Faculty</option>
                     <option value="admin">System Administrator</option>
                   </select>
                 </div>
               </div>
-
               {msg.text && (
-                <div className={`text-xs p-3 rounded-lg border font-semibold ${msg.isError ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
-                  {msg.text}
-                </div>
+                <div className={`text-xs p-3 rounded-lg border font-semibold ${msg.isError ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>{msg.text}</div>
               )}
-
-              <Button type="submit" className="px-6 py-2.5" disabled={loading}>
-                {loading ? "Provisioning Account..." : "Provision Staff Account"}
-              </Button>
+              <Button type="submit" className="px-6 py-2.5" disabled={loading}>{loading ? "Provisioning Account…" : "Provision Staff Account"}</Button>
             </form>
           </Card>
         </div>
-
         <div className="space-y-6">
           <Eyebrow>System Audit Log</Eyebrow>
           <Card className="p-5 bg-white border-slate-200 text-xs space-y-3">
@@ -1523,8 +2588,161 @@ export default function App() {
     }
   }, []);
 
+  // ── Dashboard stats handler ──
+  const fetchDashboardStats = async () => {
+    setStatsLoading(true);
+    setStatsError("");
+    try {
+      const res = await API.get("/exams/instructor/dashboard");
+      setDashboardStats(res.data);
+    } catch (err) {
+      setStatsError(err.response?.data?.message || "Failed to load dashboard stats.");
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+  // Auto-fetch exams when instructor opens Question Papers tab
+  useEffect(() => {
+    if (screen === "i-dashboard" && activeTab === "papers") {
+      fetchExams();
+    }
+  }, [screen, activeTab]);
+
+  // Auto-fetch dashboard stats when instructor is on dashboard
+  useEffect(() => {
+    if (screen === "i-dashboard" && activeTab === "dashboard") {
+      fetchDashboardStats();
+    }
+  }, [screen, activeTab]);
+
+  // ── Student exam history handler ──
+  const fetchMyHistory = async () => {
+    setHistoryLoading(true);
+    setHistoryError("");
+    try {
+      const res = await API.get("/submissions/my-history");
+      setMyHistory(res.data);
+    } catch (err) {
+      setHistoryError(err.response?.data?.message || "Failed to load exam history.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  // Auto-fetch history when student opens Results tab
+  useEffect(() => {
+    if (screen === "s-dashboard" && activeTab === "results") {
+      fetchMyHistory();
+    }
+  }, [screen, activeTab]);
+
+  // Auto-fetch users when admin opens Student Registry tab
+  useEffect(() => {
+    if (screen === "a-dashboard" && activeTab === "students") {
+      fetchUsers();
+    }
+  }, [screen, activeTab, userSearch, userRoleFilter]);
+
+  // ── Admin user management state ──
+  const [allUsers, setAllUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState("");
+  const [userSearch, setUserSearch] = useState("");
+  const [userRoleFilter, setUserRoleFilter] = useState("");
+  const [userEditModal, setUserEditModal] = useState({ open: false, user: null });
+  const [userEditSaving, setUserEditSaving] = useState(false);
+
+  // ── View single result from history ──
+  const [viewedResult, setViewedResult] = useState(null);
+  const [viewingResult, setViewingResult] = useState(false);
+
+  // ── Admin user management handlers ──
+  const fetchUsers = async () => {
+    setUsersLoading(true);
+    setUsersError("");
+    try {
+      const params = new URLSearchParams();
+      if (userRoleFilter) params.set("role", userRoleFilter);
+      if (userSearch.trim()) params.set("search", userSearch.trim());
+      const res = await API.get(`/admin/users?${params.toString()}`);
+      setAllUsers(res.data);
+    } catch (err) {
+      setUsersError(err.response?.data?.message || "Failed to load users.");
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const handleToggleUserStatus = async (userId, currentActive) => {
+    try {
+      await API.patch(`/admin/users/${userId}/status`, { active: !currentActive });
+      await fetchUsers();
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to update user status.");
+    }
+  };
+
+  const handleUpdateUser = async (userId, formData) => {
+    setUserEditSaving(true);
+    try {
+      await API.put(`/admin/users/${userId}`, formData);
+      setUserEditModal({ open: false, user: null });
+      await fetchUsers();
+    } catch (err) {
+      throw new Error(err.response?.data?.message || "Failed to update user.");
+    } finally {
+      setUserEditSaving(false);
+    }
+  };
+
+  const handleDeleteUser = async (userId, userName) => {
+    if (!window.confirm(`Permanently delete "${userName}"? This cannot be undone.`)) return;
+    try {
+      await API.delete(`/admin/users/${userId}`);
+      await fetchUsers();
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to delete user.");
+    }
+  };
+
+  const handleViewResultDetail = async (submissionId) => {
+    setViewingResult(true);
+    try {
+      const res = await API.get(`/submissions/${submissionId}/result`);
+      setViewedResult(res.data);
+      setScreen("s-result-detail");
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to load result.");
+    } finally {
+      setViewingResult(false);
+    }
+  };
+
   const [pendingRegistration, setPendingRegistration] = useState(null);
   const [submission, setSubmission] = useState(null);
+
+  // ── Exam CRUD state ──
+  const [exams, setExams] = useState([]);
+  const [examsLoading, setExamsLoading] = useState(false);
+  const [examsError, setExamsError] = useState("");
+  const [papersModal, setPapersModal] = useState({ open: false, mode: "create", exam: null });
+  const [papersSaving, setPapersSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState({ open: false, examId: null, title: "" });
+  const [deleting, setDeleting] = useState(false);
+  // ── Question CRUD state ──
+  const [questionsMap, setQuestionsMap] = useState({});
+  const [expandedExamId, setExpandedExamId] = useState(null);
+  const [questionModal, setQuestionModal] = useState({ open: false, mode: "create", examId: null, question: null });
+  const [questionSaving, setQuestionSaving] = useState(false);
+  // ── Dashboard stats state ──
+  const [dashboardStats, setDashboardStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState("");
+  // ── Student exam history state ──
+  const [myHistory, setMyHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
 
   const handleLogin = (u) => {
     setUser({ name: u.name, email: u.email, role: u.role });
@@ -1561,6 +2779,117 @@ export default function App() {
     const finalScore = submission.autoBreakdown.autoScore + manualScore;
     setSubmission((prev) => ({ ...prev, status: "published", finalScore }));
     setScreen("i-dashboard");
+  };
+
+  // ── Exam CRUD handlers ──
+  const fetchExams = async () => {
+    setExamsLoading(true);
+    setExamsError("");
+    try {
+      const res = await API.get("/exams");
+      setExams(res.data);
+    } catch (err) {
+      setExamsError(err.response?.data?.message || "Failed to load exams.");
+    } finally {
+      setExamsLoading(false);
+    }
+  };
+
+  const handleCreateExam = async (formData) => {
+    setPapersSaving(true);
+    try {
+      await API.post("/exams", formData);
+      setPapersModal({ open: false, mode: "create", exam: null });
+      await fetchExams();
+    } catch (err) {
+      throw new Error(err.response?.data?.message || "Failed to create exam.");
+    } finally {
+      setPapersSaving(false);
+    }
+  };
+
+  const handleUpdateExam = async (examId, formData) => {
+    setPapersSaving(true);
+    try {
+      await API.put(`/exams/${examId}`, formData);
+      setPapersModal({ open: false, mode: "edit", exam: null });
+      await fetchExams();
+    } catch (err) {
+      throw new Error(err.response?.data?.message || "Failed to update exam.");
+    } finally {
+      setPapersSaving(false);
+    }
+  };
+
+  const handleDeleteExam = async (examId) => {
+    setDeleting(true);
+    try {
+      await API.delete(`/exams/${examId}`);
+      setDeleteConfirm({ open: false, examId: null, title: "" });
+      await fetchExams();
+    } catch (err) {
+      setExamsError(err.response?.data?.message || "Failed to delete exam.");
+      setDeleteConfirm({ open: false, examId: null, title: "" });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // ── Question CRUD handlers ──
+  const fetchQuestions = async (examId) => {
+    setQuestionsMap((prev) => ({ ...prev, [examId]: { ...prev[examId], loading: true, error: "" } }));
+    try {
+      const res = await API.get(`/exams/${examId}/questions`);
+      setQuestionsMap((prev) => ({ ...prev, [examId]: { questions: res.data, loading: false, error: "" } }));
+    } catch (err) {
+      setQuestionsMap((prev) => ({ ...prev, [examId]: { ...prev[examId], loading: false, error: err.response?.data?.message || "Failed to load questions." } }));
+    }
+  };
+
+  const toggleQuestions = (examId) => {
+    if (expandedExamId === examId) {
+      setExpandedExamId(null);
+    } else {
+      setExpandedExamId(examId);
+      if (!questionsMap[examId]?.questions) {
+        fetchQuestions(examId);
+      }
+    }
+  };
+
+  const handleCreateQuestion = async (examId, formData) => {
+    setQuestionSaving(true);
+    try {
+      await API.post(`/exams/${examId}/questions`, formData);
+      setQuestionModal({ open: false, mode: "create", examId: null, question: null });
+      await fetchQuestions(examId);
+    } catch (err) {
+      throw new Error(err.response?.data?.message || "Failed to create question.");
+    } finally {
+      setQuestionSaving(false);
+    }
+  };
+
+  const handleUpdateQuestion = async (examId, questionId, formData) => {
+    setQuestionSaving(true);
+    try {
+      await API.put(`/exams/${examId}/questions/${questionId}`, formData);
+      setQuestionModal({ open: false, mode: "edit", examId: null, question: null });
+      await fetchQuestions(examId);
+    } catch (err) {
+      throw new Error(err.response?.data?.message || "Failed to update question.");
+    } finally {
+      setQuestionSaving(false);
+    }
+  };
+
+  const handleDeleteQuestion = async (examId, questionId) => {
+    try {
+      await API.delete(`/exams/${examId}/questions/${questionId}`);
+      await fetchQuestions(examId);
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to delete question.");
+    }
   };
 
   const isLoggedIn = () => !!localStorage.getItem("token");
@@ -1613,7 +2942,7 @@ export default function App() {
             />
 
             <main className="flex-1 p-8 overflow-y-auto">
-              {screen === "s-dashboard" && (
+              {screen === "s-dashboard" && activeTab !== "results" && (
                 <StudentDashboard
                   user={user}
                   submission={submission}
@@ -1624,19 +2953,88 @@ export default function App() {
                   onSelectTab={setActiveTab}
                 />
               )}
-              {screen === "i-dashboard" && (
+              {screen === "s-dashboard" && activeTab === "results" && (
+                <StudentExamHistory
+                  history={myHistory}
+                  loading={historyLoading}
+                  error={historyError}
+                  onRetry={fetchMyHistory}
+                  onViewResult={handleViewResultDetail}
+                />
+              )}
+              {screen === "i-dashboard" && activeTab === "dashboard" && (
                 <InstructorDashboard
                   user={user}
                   submission={submission}
+                  stats={dashboardStats}
+                  statsLoading={statsLoading}
+                  statsError={statsError}
+                  onRetryStats={fetchDashboardStats}
                   onLogout={handleLogout}
                   onOpenGrading={() => setScreen("i-grading")}
                 />
               )}
-              {screen === "a-dashboard" && (
+              {screen === "i-dashboard" && activeTab === "grading" && (
+                <InstructorDashboard
+                  user={user}
+                  submission={submission}
+                  stats={dashboardStats}
+                  statsLoading={statsLoading}
+                  statsError={statsError}
+                  onRetryStats={fetchDashboardStats}
+                  onLogout={handleLogout}
+                  onOpenGrading={() => setScreen("i-grading")}
+                />
+              )}
+              {screen === "i-dashboard" && activeTab === "results" && (
+                <InstructorDashboard
+                  user={user}
+                  submission={submission}
+                  stats={dashboardStats}
+                  statsLoading={statsLoading}
+                  statsError={statsError}
+                  onRetryStats={fetchDashboardStats}
+                  onLogout={handleLogout}
+                  onOpenGrading={() => setScreen("i-grading")}
+                />
+              )}
+              {screen === "i-dashboard" && activeTab === "papers" && (
+                <QuestionPapers
+                  exams={exams}
+                  loading={examsLoading}
+                  error={examsError}
+                  onRefresh={fetchExams}
+                  onCreateClick={() => setPapersModal({ open: true, mode: "create", exam: null })}
+                  onEditClick={(exam) => setPapersModal({ open: true, mode: "edit", exam })}
+                  onDeleteClick={(exam) => setDeleteConfirm({ open: true, examId: exam._id, title: exam.title })}
+                  questionsMap={questionsMap}
+                  expandedExamId={expandedExamId}
+                  onToggleQuestions={toggleQuestions}
+                  onAddQuestion={(examId) => setQuestionModal({ open: true, mode: "create", examId, question: null })}
+                  onEditQuestion={(examId, question) => setQuestionModal({ open: true, mode: "edit", examId, question })}
+                  onDeleteQuestion={handleDeleteQuestion}
+                />
+              )}
+              {screen === "a-dashboard" && activeTab !== "students" && (
                 <AdminDashboard
                   user={user}
                   submission={submission}
                   onLogout={handleLogout}
+                />
+              )}
+              {screen === "a-dashboard" && activeTab === "students" && (
+                <UserManagement
+                  users={allUsers}
+                  loading={usersLoading}
+                  error={usersError}
+                  search={userSearch}
+                  roleFilter={userRoleFilter}
+                  onSearchChange={setUserSearch}
+                  onRoleFilterChange={setUserRoleFilter}
+                  onRefresh={fetchUsers}
+                  onEdit={(u) => setUserEditModal({ open: true, user: u })}
+                  onToggleStatus={handleToggleUserStatus}
+                  onDelete={handleDeleteUser}
                 />
               )}
             </main>
@@ -1651,9 +3049,78 @@ export default function App() {
       {screen === "s-result" && submission?.status === "published" && (
         <StudentResult submission={submission} onBack={() => setScreen("s-dashboard")} />
       )}
+      {screen === "s-result-detail" && viewedResult && (
+        <div className="flex min-h-screen">
+          <AppSidebar
+            collapsed={sidebarCollapsed}
+            onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+            activeTab="results"
+            onSelectTab={(tab) => { setActiveTab(tab); setScreen("s-dashboard"); }}
+            role={user?.role}
+            user={user}
+            onLogout={handleLogout}
+          />
+          <div className="flex-1 flex flex-col min-w-0">
+            <AppHeader
+              user={user}
+              role={user?.role}
+              onLogout={handleLogout}
+              collapsed={sidebarCollapsed}
+              onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+            />
+            <main className="flex-1 p-8 overflow-y-auto">
+              <HistoryResultView
+                result={viewedResult}
+                onBack={() => setScreen("s-dashboard")}
+              />
+            </main>
+          </div>
+        </div>
+      )}
       {screen === "i-grading" && submission && (
         <GradingQueue submission={submission} onSave={handleSaveGrade} onPublish={handlePublish} onBack={() => setScreen("i-dashboard")} />
       )}
+
+      {/* ── Question Papers Modals ── */}
+      <ExamFormModal
+        open={papersModal.open}
+        mode={papersModal.mode}
+        exam={papersModal.exam}
+        saving={papersSaving}
+        onSave={(formData) =>
+          papersModal.mode === "edit"
+            ? handleUpdateExam(papersModal.exam._id, formData)
+            : handleCreateExam(formData)
+        }
+        onClose={() => setPapersModal({ open: false, mode: "create", exam: null })}
+      />
+      <QuestionFormModal
+        open={questionModal.open}
+        mode={questionModal.mode}
+        examId={questionModal.examId}
+        question={questionModal.question}
+        saving={questionSaving}
+        onSave={(formData) =>
+          questionModal.mode === "edit"
+            ? handleUpdateQuestion(questionModal.examId, questionModal.question._id, formData)
+            : handleCreateQuestion(questionModal.examId, formData)
+        }
+        onClose={() => setQuestionModal({ open: false, mode: "create", examId: null, question: null })}
+      />
+      <DeleteConfirmModal
+        open={deleteConfirm.open}
+        examTitle={deleteConfirm.title}
+        deleting={deleting}
+        onConfirm={() => handleDeleteExam(deleteConfirm.examId)}
+        onClose={() => setDeleteConfirm({ open: false, examId: null, title: "" })}
+      />
+      <UserEditModal
+        open={userEditModal.open}
+        user={userEditModal.user}
+        saving={userEditSaving}
+        onSave={(formData) => handleUpdateUser(userEditModal.user._id, formData)}
+        onClose={() => setUserEditModal({ open: false, user: null })}
+      />
     </div>
   );
 }

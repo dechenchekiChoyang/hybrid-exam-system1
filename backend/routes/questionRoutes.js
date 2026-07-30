@@ -37,6 +37,73 @@ router.get('/:examId/questions', verifyJWT, authorizeRoles('instructor', 'admin'
   }
 });
 
+// PUT /api/exams/:examId/questions/:questionId — update an existing question
+router.put('/:examId/questions/:questionId', verifyJWT, authorizeRoles('instructor', 'admin'), async (req, res, next) => {
+  try {
+    const { examId, questionId } = req.params;
+
+    if (!mongoose.isValidObjectId(examId)) {
+      return res.status(400).json({ message: 'Invalid exam ID.' });
+    }
+    if (!mongoose.isValidObjectId(questionId)) {
+      return res.status(400).json({ message: 'Invalid question ID.' });
+    }
+
+    // Verify the question belongs to this exam
+    const question = await Question.findOne({ _id: questionId, exam: examId });
+    if (!question) {
+      return res.status(404).json({ message: 'Question not found in this exam.' });
+    }
+
+    const {
+      type, text, difficulty, topic, explanation,
+      options, correctOptionIndex, acceptedAnswers,
+      marks, maxMarks,
+    } = req.body;
+
+    // Update type-specific fields
+    if (type !== undefined) question.type = type;
+    if (text !== undefined) question.text = text;
+    if (difficulty !== undefined) question.difficulty = difficulty;
+    if (topic !== undefined) question.topic = topic;
+    if (explanation !== undefined) question.explanation = explanation;
+
+    // mcq / true_false fields
+    if (options !== undefined) question.options = options;
+    if (correctOptionIndex !== undefined) question.correctOptionIndex = correctOptionIndex;
+
+    // fill_blank fields
+    if (acceptedAnswers !== undefined) question.acceptedAnswers = acceptedAnswers;
+
+    // marks
+    if (marks !== undefined) question.marks = marks;
+    if (maxMarks !== undefined) question.maxMarks = maxMarks;
+
+    // Clear conflicting fields when type changes
+    if (type !== undefined) {
+      if (type === 'short_answer') {
+        question.options = undefined;
+        question.correctOptionIndex = undefined;
+        question.acceptedAnswers = undefined;
+        question.marks = undefined;
+      } else if (type === 'fill_blank') {
+        question.options = undefined;
+        question.correctOptionIndex = undefined;
+        question.maxMarks = undefined;
+      } else {
+        // mcq / true_false
+        question.acceptedAnswers = undefined;
+        question.maxMarks = undefined;
+      }
+    }
+
+    await question.save(); // triggers pre-validate hook
+    res.json(question);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // DELETE /api/exams/:examId/questions/:questionId
 router.delete('/:examId/questions/:questionId', verifyJWT, authorizeRoles('instructor', 'admin'), async (req, res, next) => {
   try {

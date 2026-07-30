@@ -12,6 +12,7 @@ import authRoutes from './routes/authRoutes.js';
 import examRoutes from './routes/examRoutes.js';
 import questionRoutes from './routes/questionRoutes.js';
 import submissionRoutes from './routes/submissionRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
 
 import { seedDefaultUsers } from './seedAdmin.js';
 
@@ -50,6 +51,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/exams', examRoutes);
 app.use('/api/exams', questionRoutes); // shares the /api/exams/:examId/... prefix
 app.use('/api/submissions', submissionRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

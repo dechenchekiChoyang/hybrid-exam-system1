@@ -9,11 +9,143 @@ import { MANUAL_GRADED_TYPES } from '../models/Question.js';
 
 const router = express.Router();
 
+/* ── Helper: compute remaining time for an in-progress submission ── */
+function timerPayload(submission, exam) {
+  const endsAt = new Date(submission.startedAt.getTime() + exam.durationMinutes * 60 * 1000);
+  const remainingSeconds = Math.max(0, Math.floor((endsAt - Date.now()) / 1000));
+  return {
+    submissionId: submission._id,
+    startedAt: submission.startedAt,
+    endsAt,
+    remainingSeconds,
+    expired: remainingSeconds <= 0,
+    durationMinutes: exam.durationMinutes,
+  };
+}
+
+/* ----------------------------------------------------------
+   POST /api/submissions/:examId/start
+   Student begins or resumes an exam. Records server-side
+   startedAt so the backend is the authority for timing.
+---------------------------------------------------------- */
+router.post('/:examId/start', verifyJWT, authorizeRoles('student'), async (req, res, next) => {
+  try {
+    const { examId } = req.params;
+    const studentId = req.user.id;
+
+    const exam = await Exam.findById(examId).lean();
+    if (!exam) return res.status(404).json({ message: 'Exam not found.' });
+    if (!exam.isPublished) return res.status(403).json({ message: 'Exam is not available.' });
+
+    // Check window
+    const now = new Date();
+    if (exam.startWindow && now < exam.startWindow) return res.status(403).json({ message: 'Exam has not started yet.' });
+    if (exam.endWindow && now > exam.endWindow) return res.status(403).json({ message: 'Exam window has closed.' });
+
+    // Resume existing in-progress submission
+    let submission = await Submission.findOne({ student: studentId, exam: examId, status: 'in-progress' });
+
+    if (!submission) {
+      const attemptCount = await Submission.countDocuments({ student: studentId, exam: examId });
+      if (attemptCount >= (exam.maxAttempts || 1)) {
+        return res.status(400).json({ message: 'Maximum attempts reached for this exam.' });
+      }
+      submission = await Submission.create({
+        student: studentId,
+        exam: examId,
+        status: 'in-progress',
+        startedAt: new Date(),
+      });
+    }
+
+    res.json(timerPayload(submission, exam));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ----------------------------------------------------------
+   GET /api/submissions/:examId/timer
+   Student fetches remaining time for an ongoing exam.
+---------------------------------------------------------- */
+router.get('/:examId/timer', verifyJWT, authorizeRoles('student'), async (req, res, next) => {
+  try {
+    const { examId } = req.params;
+    const studentId = req.user.id;
+
+    const exam = await Exam.findById(examId).lean();
+    if (!exam) return res.status(404).json({ message: 'Exam not found.' });
+
+    const submission = await Submission.findOne({ student: studentId, exam: examId }).lean();
+    if (!submission) {
+      return res.status(404).json({ message: 'No active exam session found.' });
+    }
+
+    if (submission.status !== 'in-progress') {
+      return res.json({
+        submissionId: submission._id,
+        startedAt: submission.startedAt,
+        submittedAt: submission.submittedAt,
+        remainingSeconds: 0,
+        expired: true,
+        status: submission.status,
+        durationMinutes: exam.durationMinutes,
+      });
+    }
+
+    res.json(timerPayload(submission, exam));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ----------------------------------------------------------
+   POST /api/submissions/:examId/save
+   Student saves answers mid-exam. Enforces timer.
+---------------------------------------------------------- */
+router.post('/:examId/save', verifyJWT, authorizeRoles('student'), async (req, res, next) => {
+  try {
+    const { examId } = req.params;
+    const { answers } = req.body;
+    const studentId = req.user.id;
+
+    if (!Array.isArray(answers)) {
+      return res.status(400).json({ message: 'answers must be an array.' });
+    }
+
+    const exam = await Exam.findById(examId).lean();
+    if (!exam) return res.status(404).json({ message: 'Exam not found.' });
+
+    const submission = await Submission.findOne({ student: studentId, exam: examId, status: 'in-progress' });
+    if (!submission) {
+      return res.status(400).json({ message: 'No active exam session. Start the exam first.' });
+    }
+
+    // Enforce timer
+    const endsAt = new Date(submission.startedAt.getTime() + exam.durationMinutes * 60 * 1000);
+    if (Date.now() >= endsAt) {
+      submission.status = 'submitted';
+      submission.submittedAt = new Date();
+      submission.answers = answers;
+      await submission.save();
+      return res.status(400).json({ message: 'Exam time has expired. Your answers have been auto-submitted.' });
+    }
+
+    submission.answers = answers;
+    await submission.save();
+
+    res.json({ message: 'Answers saved.', savedAt: new Date() });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /* ----------------------------------------------------------
    POST /api/submissions/:examId
    Student submits. Objective questions are auto-graded and
    scored server-side; manual questions are stored as pending.
    No score of any kind is returned to the student here.
+   ENFORCES server-side timer — rejects if time expired.
 ---------------------------------------------------------- */
 router.post('/:examId', verifyJWT, authorizeRoles('student'), async (req, res, next) => {
   try {
@@ -27,6 +159,18 @@ router.post('/:examId', verifyJWT, authorizeRoles('student'), async (req, res, n
 
     const exam = await Exam.findById(examId).lean();
     if (!exam) return res.status(404).json({ message: 'Exam not found.' });
+
+    // ── Server-side timer enforcement ──
+    const startedSub = await Submission.findOne({ student: studentId, exam: examId }).lean();
+    if (startedSub && startedSub.startedAt) {
+      const endsAt = new Date(startedSub.startedAt.getTime() + exam.durationMinutes * 60 * 1000);
+      if (Date.now() > endsAt) {
+        return res.status(400).json({
+          message: 'Exam time has expired. Your submission cannot be accepted.',
+          expired: true,
+        });
+      }
+    }
 
     const questionIds = answers.map((a) => a.question);
     const questions = await Question.find({ _id: { $in: questionIds } }).lean();
@@ -76,6 +220,53 @@ router.get('/exam/:examId', verifyJWT, authorizeRoles('instructor', 'admin'), as
       .populate('student', 'fullName email')
       .lean();
     res.json(submissions);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ----------------------------------------------------------
+   GET /api/submissions/my-history
+   Student: list all of the logged-in student's submissions
+   with exam info, scores, and pass/fail status.
+---------------------------------------------------------- */
+router.get('/my-history', verifyJWT, authorizeRoles('student'), async (req, res, next) => {
+  try {
+    const studentId = req.user.id;
+
+    const submissions = await Submission.find({ student: studentId })
+      .sort({ submittedAt: -1 })
+      .lean();
+
+    // Collect unique exam IDs
+    const examIds = [...new Set(submissions.map((s) => s.exam.toString()))];
+    const exams = await Exam.find({ _id: { $in: examIds } }).lean();
+    const examMap = new Map(exams.map((e) => [e._id.toString(), e]));
+
+    const history = submissions.map((sub) => {
+      const exam = examMap.get(sub.exam.toString()) || {};
+      const totalMarks = sub.autoPossible + (sub.manualPossible || 0);
+      const score = sub.finalScore ?? (sub.autoScore + (sub.manualScore || 0));
+      const percentage = totalMarks > 0 ? Math.round((score / totalMarks) * 100) : null;
+      const passed = exam.passingMarks != null && score != null ? score >= exam.passingMarks : null;
+
+      return {
+        _id: sub._id,
+        examId: exam._id,
+        title: exam.title || 'Untitled Exam',
+        subject: exam.subject || '',
+        submittedAt: sub.submittedAt || sub.createdAt,
+        status: sub.status,
+        score,
+        totalMarks,
+        percentage,
+        passingMarks: exam.passingMarks,
+        passed,
+        finalScore: sub.finalScore,
+      };
+    });
+
+    res.json(history);
   } catch (err) {
     next(err);
   }
