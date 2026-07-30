@@ -3158,7 +3158,7 @@ export default function App() {
   const fetchQuestions = async (examId) => {
     setQuestionsMap((prev) => ({ ...prev, [examId]: { ...prev[examId], loading: true, error: "" } }));
     try {
-      const res = await API.get(`/exams/${examId}/questions`);
+      const res = await API.get(`/api/exams/${examId}/questions`);
       setQuestionsMap((prev) => ({ ...prev, [examId]: { questions: res.data, loading: false, error: "" } }));
     } catch (err) {
       setQuestionsMap((prev) => ({ ...prev, [examId]: { ...prev[examId], loading: false, error: err.response?.data?.message || "Failed to load questions." } }));
