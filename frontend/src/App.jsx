@@ -193,7 +193,7 @@ function useServerCountdown(examId, fallbackSeconds, active, onExpire) {
           }
           if (res.data?.startedAt) { lastSync.current = Date.now(); }
         } catch {
-          res = await API.post(`/submissions/${examId}/start`);
+          res = await API.post(`/api/submissions/${examId}/start`);
           lastSync.current = Date.now();
         }
 
