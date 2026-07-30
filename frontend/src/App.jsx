@@ -2951,7 +2951,7 @@ export default function App() {
   const handleStartExam = async (exam) => {
     setExamStartLoading(true);
     try {
-      const res = await API.get(`/api/exams/${exam._id}/attempt`);
+      const res = await API.get(`/api/${exam._id}/attempt`);
       setActiveExam(exam);
       setActiveExamQuestions(res.data.questions);
       setScreen("s-summary");
