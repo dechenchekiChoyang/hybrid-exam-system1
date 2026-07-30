@@ -236,7 +236,7 @@ function useServerCountdown(examId, fallbackSeconds, active, onExpire) {
     // Sync with server every 30 seconds
     const syncId = setInterval(async () => {
       try {
-        const res = await API.get(`/submissions/${examId}/timer`);
+        const res = await API.get(`/api/api/submissions/${examId}/timer`);
         if (res?.data && typeof res.data.remainingSeconds === "number") {
           setSecondsLeft(res.data.remainingSeconds);
           lastSync.current = Date.now();
@@ -856,7 +856,7 @@ function HistoryResultView({ result, submissionId, onBack }) {
     if (!submissionId) return;
     setDownloading(true);
     try {
-      const res = await API.get(`/submissions/${submissionId}/marksheet`);
+      const res = await API.get(`/api/submissions/${submissionId}/marksheet`);
       const d = res.data;
 
       const { default: jsPDF } = await import("jspdf");
@@ -2893,7 +2893,7 @@ export default function App() {
   const openGradingForExam = async (examId) => {
     setGradingLoading(true);
     try {
-      const res = await API.get(`/submissions/exam/${examId}`);
+      const res = await API.get(`/api/submissions/exam/${examId}`);
       setGradingExamId(examId);
       setGradingSubmissions(res.data || []);
       setActiveGradingSubmission(null);
@@ -2909,7 +2909,7 @@ export default function App() {
   const openGradingSubmission = async (submissionId) => {
     setGradingLoading(true);
     try {
-      const res = await API.get(`/submissions/${submissionId}`);
+      const res = await API.get(`/api/submissions/${submissionId}`);
       setActiveGradingSubmission(res.data);
       setGradingQuestions(res.data.questions || []);
     } catch (err) {
@@ -2921,7 +2921,7 @@ export default function App() {
 
   const saveGrade = async (submissionId, questionId, marks, feedback) => {
     try {
-      await API.patch(`/submissions/${submissionId}/grade`, { questionId, marks, feedback });
+      await API.patch(`/api/submissions/${submissionId}/grade`, { questionId, marks, feedback });
       // Refresh submission detail
       await openGradingSubmission(submissionId);
     } catch (err) {
@@ -2931,10 +2931,10 @@ export default function App() {
 
   const publishResult = async (submissionId) => {
     try {
-      await API.post(`/submissions/${submissionId}/publish`);
+      await API.post(`/api/submissions/${submissionId}/publish`);
       // Refresh everything
       await openGradingSubmission(submissionId);
-      const res = await API.get(`/submissions/exam/${gradingExamId}`);
+      const res = await API.get(`/api/submissions/exam/${gradingExamId}`);
       setGradingSubmissions(res.data || []);
       fetchDashboardStats();
     } catch (err) {
@@ -3038,7 +3038,7 @@ export default function App() {
   const handleViewResultDetail = async (submissionId) => {
     setViewingResult(true);
     try {
-      const res = await API.get(`/submissions/${submissionId}/result`);
+      const res = await API.get(`/api/submissions/${submissionId}/result`);
       setViewedResult(res.data);
       setCurrentViewingSubmissionId(submissionId);
       setScreen("s-result-detail");
@@ -3084,7 +3084,7 @@ export default function App() {
           : { question: qId, textAnswer: val ?? "" };
       });
 
-      await API.post(`/submissions/${activeExam._id}`, { answers: answersArray });
+      await API.post(`/api/submissions/${activeExam._id}`, { answers: answersArray });
 
       setSubmission({ status: "submitted" });
       setScreen("s-confirm");
