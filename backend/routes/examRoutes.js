@@ -220,7 +220,7 @@ router.patch('/:examId/publish', verifyJWT, authorizeRoles('instructor', 'admin'
 });
 
 // GET /api/exams/:examId/attempt — student-facing, correct answers stripped
-router.get('api/:examId/attempt', verifyJWT, authorizeRoles('student'), async (req, res, next) => {
+router.get('/api/:examId/attempt', verifyJWT, authorizeRoles('student'), async (req, res, next) => {
   try {
     const { examId } = req.params;
     if (!mongoose.isValidObjectId(examId)) {
