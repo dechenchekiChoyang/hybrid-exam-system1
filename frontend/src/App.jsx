@@ -3109,7 +3109,7 @@ export default function App() {
   const handleCreateExam = async (formData) => {
     setPapersSaving(true);
     try {
-      await API.post("/exams", formData);
+      await API.post("/api/exams", formData);
       setPapersModal({ open: false, mode: "create", exam: null });
       await fetchExams();
     } catch (err) {
@@ -3122,7 +3122,7 @@ export default function App() {
   const handleUpdateExam = async (examId, formData) => {
     setPapersSaving(true);
     try {
-      await API.put(`/exams/${examId}`, formData);
+      await API.put(`/api/exams/${examId}`, formData);
       setPapersModal({ open: false, mode: "edit", exam: null });
       await fetchExams();
     } catch (err) {
