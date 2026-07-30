@@ -1,4 +1,6 @@
+import React from 'react';
 import API from "./services/api";
+import LandingPage from "./components/LandingPage";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   Eye,
@@ -2807,6 +2809,7 @@ function AdminDashboard({ user, submission, onLogout }) {
    MAIN APP ROUTER
    ============================================================ */
 export default function App() {
+  const [showLanding, setShowLanding] = useState(true);
   const [screen, setScreen] = useState("landing");
   const [user, setUser] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -2866,6 +2869,25 @@ export default function App() {
   const [activeGradingSubmission, setActiveGradingSubmission] = useState(null);
   const [gradingQuestions, setGradingQuestions] = useState([]);
   const [gradingLoading, setGradingLoading] = useState(false);
+
+  useEffect(() => {
+  const token = localStorage.getItem("token");
+  const savedUser = localStorage.getItem("user");
+
+  if (token && savedUser) {
+    const parsedUser = JSON.parse(savedUser);
+    setUser(parsedUser);
+    setShowLanding(false);
+
+    if (parsedUser.role === "student") {
+      setScreen("s-dashboard");
+    } else if (parsedUser.role === "instructor") {
+      setScreen("i-dashboard");
+    } else if (parsedUser.role === "admin") {
+      setScreen("a-dashboard");
+    }
+  }
+}, []);
 
   // ── All handler / API functions ──
   const openGradingForExam = async (examId) => {
@@ -3030,6 +3052,7 @@ export default function App() {
   const handleLogin = (u) => {
     setUser({ name: u.name, email: u.email, role: u.role });
     setActiveTab("dashboard");
+    setShowLanding(false);
     if (u.role === "student") setScreen("s-dashboard");
     else if (u.role === "instructor") setScreen("i-dashboard");
     else setScreen("a-dashboard");
@@ -3039,6 +3062,7 @@ export default function App() {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     setUser(null);
+    setShowLanding(true); // Return to your landing page on logout
     setScreen("landing");
   };
 
@@ -3235,6 +3259,17 @@ export default function App() {
   const isLoggedIn = () => !!localStorage.getItem("token");
   const isDashboardScreen = ["s-dashboard", "i-dashboard", "a-dashboard"].includes(screen);
 
+  // 1. RENDER YOUR NEW LANDING PAGE FIRST
+  if (showLanding) {
+    return (
+      <LandingPage
+        onSignIn={() => setShowLanding(false)}
+        onGetStarted={() => setShowLanding(false)}
+      />
+    );
+  }
+
+  // 2. TEAMMATE'S EXISTING PORTAL FLOW
   return (
     <div className="min-h-screen bg-slate-50 font-sans">
       <style>{`${FONT_IMPORT} * { box-sizing: border-box; } body { margin: 0; font-family: 'IBM Plex Sans', sans-serif; background-color: #F8FAFC; }`}</style>
