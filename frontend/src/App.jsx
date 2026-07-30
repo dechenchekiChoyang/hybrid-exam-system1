@@ -3097,7 +3097,7 @@ export default function App() {
     setExamsLoading(true);
     setExamsError("");
     try {
-      const res = await API.get("/exams");
+      const res = await API.get("/api/exams");
       setExams(res.data);
     } catch (err) {
       setExamsError(err.response?.data?.message || "Failed to load exams.");
