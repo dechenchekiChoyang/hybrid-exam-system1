@@ -3,6 +3,8 @@ import {
   register,
   login,
   getProfile,
+  createStaff,
+  changePassword,
 } from "../controllers/authController.js";
 import { protect, authorize } from "../middleware/authMiddleware.js";
 
@@ -17,21 +19,10 @@ router.post("/login", login);
 // Logged-in User Profile
 router.get("/profile", protect, getProfile);
 
-router.post(
-  "/create-staff",
-  protect,
-  authorize("admin"),
-  (req, res) => {
-    res.status(501).json({
-      message: "Create staff API will be implemented in the next step.",
-    });
-  }
-);
+// Admin-only Staff Creation
+router.post("/create-staff", protect, authorize("admin"), createStaff);
 
-router.patch("/change-password", protect, (req, res) => {
-  res.status(501).json({
-    message: "Change password API will be implemented in the next step.",
-  });
-});
+// Change Password
+router.patch("/change-password", protect, changePassword);
 
 export default router;

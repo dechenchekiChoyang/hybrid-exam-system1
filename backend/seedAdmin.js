@@ -1,49 +1,58 @@
-// One-time setup script: creates the first Admin account directly in the
-// database. This is the only way an Admin account exists initially — after
-// this, that Admin can create instructors and secondary admins through
-// POST /api/auth/create-staff.
-//
-// Usage:
-//   node utils/seedAdmin.js
-// (reads MONGO_URI from .env, same as the server does)
-
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import User from '../models/User.js';
+import User from './models/User.js';
 
-const ADMIN_NAME = process.env.SEED_ADMIN_NAME || 'System Admin';
-const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || 'admin@college.edu';
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'ChangeMe123!';
+export async function seedDefaultUsers() {
+  const usersToSeed = [
+    {
+      fullName: 'System Admin',
+      email: 'admin@college.edu',
+      password: 'Admin123!',
+      role: 'admin',
+    },
+    {
+      fullName: 'Dr. Karma Wangchuk',
+      email: 'instructor@college.edu',
+      password: 'Instructor123!',
+      role: 'instructor',
+      department: 'Computer Science',
+    },
+    {
+      fullName: 'Choyang Dema',
+      email: 'student@college.edu',
+      password: 'Student123!',
+      role: 'student',
+      department: 'Computer Science',
+      enrollmentId: 'STU1001',
+    },
+  ];
 
-async function seed() {
+  for (const u of usersToSeed) {
+    const existing = await User.findOne({ email: u.email.toLowerCase() });
+    if (!existing) {
+      await User.create(u);
+      console.log(`Seeded ${u.role} account: ${u.email}`);
+    }
+  }
+}
+
+async function runSeed() {
   if (!process.env.MONGO_URI) {
-    console.error('MONGO_URI is not set. Copy .env.example to .env and fill it in first.');
+    console.error('MONGO_URI is not set in .env');
     process.exit(1);
   }
 
   await mongoose.connect(process.env.MONGO_URI);
-  console.log(`Connected to ${mongoose.connection.name}`);
-
-  const existing = await User.findOne({ email: ADMIN_EMAIL.toLowerCase() });
-  if (existing) {
-    console.log(`An account with email ${ADMIN_EMAIL} already exists (role: ${existing.role}). Nothing to do.`);
-  } else {
-    const admin = await User.create({
-      fullName: ADMIN_NAME,
-      email: ADMIN_EMAIL,
-      password: ADMIN_PASSWORD,
-      role: 'admin',
-    });
-    console.log('First admin account created:');
-    console.log(`  email:    ${admin.email}`);
-    console.log(`  password: ${ADMIN_PASSWORD}  (change this after first login)`);
-  }
-
+  console.log(`Connected to MongoDB: ${mongoose.connection.name}`);
+  await seedDefaultUsers();
+  console.log('Seeding complete.');
   await mongoose.disconnect();
   process.exit(0);
 }
 
-seed().catch((err) => {
-  console.error('Seed failed:', err.message);
-  process.exit(1);
-});
+if (process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('seedAdmin.js')) {
+  runSeed().catch((err) => {
+    console.error('Seed failed:', err.message);
+    process.exit(1);
+  });
+}

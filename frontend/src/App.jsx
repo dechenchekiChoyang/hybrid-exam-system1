@@ -37,9 +37,9 @@ const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=IBM+P
    FinalResults) described in the spec. One demo student/exam.
    ============================================================ */
 const MOCK_USERS = {
-  student: { name: "Choyang Dema", email: "choyang@student.edu" },
-  instructor: { name: "Dr. Karma Wangchuk", email: "karma@faculty.edu" },
-  admin: { name: "System Admin", email: "admin@institution.edu" },
+  student: { name: "Choyang Dema", email: "student@college.edu" },
+  instructor: { name: "Dr. Karma Wangchuk", email: "instructor@college.edu" },
+  admin: { name: "System Admin", email: "admin@college.edu" },
 };
 
 const MOCK_EXAM = {
@@ -536,6 +536,7 @@ function RoleLoginScreen({ role, onLogin, onBack, onGoToRegister }) {
     const res = await API.post("/auth/login", {
       email,
       password,
+      role,
     });
 
     const userToSave = {
@@ -559,6 +560,8 @@ function RoleLoginScreen({ role, onLogin, onBack, onGoToRegister }) {
     setLoading(false);
   }
 };
+
+  const defaultPass = role === "admin" ? "Admin123!" : role === "instructor" ? "Instructor123!" : "Student123!";
 
   return (
     <AuthShell eyebrow={`${meta.label} sign in`} title={`${meta.icon} ${meta.label} Login`}
@@ -584,6 +587,12 @@ function RoleLoginScreen({ role, onLogin, onBack, onGoToRegister }) {
           <div className="text-right mt-1.5">
             <span style={{ color: COLORS.accent }} className="text-xs cursor-pointer">Forgot password?</span>
           </div>
+        </div>
+
+        <div className="p-3 rounded-lg border text-xs leading-relaxed" style={{ background: "rgba(30, 41, 59, 0.5)", borderColor: COLORS.border, color: COLORS.textMuted }}>
+          <span className="font-semibold text-slate-200">Default Demo Credentials:</span><br />
+          Email: <code className="text-blue-400">{meta.email}</code><br />
+          Password: <code className="text-blue-400">{defaultPass}</code>
         </div>
 
         {error && <div style={{ color: COLORS.red }} className="text-xs">{error}</div>}

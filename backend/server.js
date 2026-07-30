@@ -13,6 +13,8 @@ import examRoutes from './routes/examRoutes.js';
 import questionRoutes from './routes/questionRoutes.js';
 import submissionRoutes from './routes/submissionRoutes.js';
 
+import { seedDefaultUsers } from './seedAdmin.js';
+
 const app = express();
 app.set("trust proxy", 1);
 app.use(helmet());
@@ -55,7 +57,8 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 
 connectDB()
-  .then(() => {
+  .then(async () => {
+    await seedDefaultUsers().catch((err) => console.error("Seed error:", err.message));
     app.listen(PORT, () => console.log(`Server listening on http://localhost:${PORT}`));
   })
   .catch((err) => {
