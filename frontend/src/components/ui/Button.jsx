@@ -1,15 +1,5 @@
 import React from "react";
 
-const COLORS = {
-  primary: "#2563EB",
-  success: "#16A34A",
-  danger: "#DC2626",
-  warning: "#F59E0B",
-  dark: "#171B22",
-  border: "#2B3140",
-  white: "#ffffff",
-};
-
 export default function Button({
   children,
   onClick,
@@ -18,38 +8,13 @@ export default function Button({
   disabled = false,
   className = "",
 }) {
-  const styles = {
-    primary: {
-      background: COLORS.primary,
-      color: COLORS.white,
-    },
-
-    success: {
-      background: COLORS.success,
-      color: COLORS.white,
-    },
-
-    danger: {
-      background: COLORS.danger,
-      color: COLORS.white,
-    },
-
-    warning: {
-      background: COLORS.warning,
-      color: "#111827",
-    },
-
-    outline: {
-      background: "transparent",
-      color: COLORS.white,
-      border: `1px solid ${COLORS.border}`,
-    },
-
-    dark: {
-      background: COLORS.dark,
-      color: COLORS.white,
-      border: `1px solid ${COLORS.border}`,
-    },
+  const variantStyles = {
+    primary: "bg-blue-600 hover:bg-blue-700 text-white shadow-sm shadow-blue-500/20 border-transparent",
+    success: "bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm border-transparent",
+    danger: "bg-red-600 hover:bg-red-700 text-white shadow-sm border-transparent",
+    warning: "bg-amber-500 hover:bg-amber-600 text-white shadow-sm border-transparent",
+    outline: "bg-white hover:bg-slate-50 text-slate-700 border-slate-300 shadow-sm",
+    dark: "bg-slate-900 hover:bg-slate-800 text-white border-transparent shadow-sm",
   };
 
   return (
@@ -57,8 +22,7 @@ export default function Button({
       type={type}
       onClick={onClick}
       disabled={disabled}
-      style={styles[variant]}
-      className={`px-5 py-3 rounded-xl font-semibold transition-all duration-300 hover:scale-105 disabled:opacity-50 ${className}`}
+      className={`px-5 py-2.5 rounded-xl font-semibold transition-all duration-200 border disabled:opacity-50 disabled:cursor-not-allowed ${variantStyles[variant] || variantStyles.primary} ${className}`}
     >
       {children}
     </button>

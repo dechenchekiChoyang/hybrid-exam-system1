@@ -13,97 +13,66 @@ export default function TopBar({
     year: "numeric",
   });
 
-  const displayName =
-    user?.fullName ||
-    user?.name ||
-    "Student";
-
-  const initials = displayName
-    .charAt(0)
-    .toUpperCase();
+  const displayName = user?.fullName || user?.name || "Student";
+  const initials = displayName.charAt(0).toUpperCase();
 
   return (
-    <header className="h-20 bg-[#171B22] border-b border-[#2B3140] px-8 flex items-center justify-between">
-
+    <header className="h-20 bg-white border-b border-slate-200 px-8 flex items-center justify-between shadow-xs sticky top-0 z-50">
       {/* Left Side */}
       <div>
-        <h2 className="text-2xl font-bold text-white">
-          Welcome back, {displayName} 👋
+        <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+          Welcome Back, {displayName} 👋
         </h2>
-
-        <p className="text-sm text-gray-400 mt-1">
-          {today}
+        <p className="text-xs text-slate-500 font-medium mt-0.5">
+          {today} • Royal Examination Portal
         </p>
       </div>
 
       {/* Search */}
-      <div className="relative w-[420px]">
-
+      <div className="relative w-80 hidden md:block">
         <Search
-          size={18}
-          className="absolute left-4 top-3.5 text-gray-500"
+          size={16}
+          className="absolute left-3.5 top-3 text-slate-400"
         />
-
         <input
           type="text"
-          placeholder="Search exams, results..."
-          className="w-full h-11 rounded-xl bg-[#111827] border border-[#2B3140] pl-11 pr-4 text-white placeholder-gray-500 outline-none focus:border-blue-500 transition"
+          placeholder="Search exams, results, notices..."
+          className="w-full h-10 rounded-xl bg-slate-50 border border-slate-200 pl-10 pr-4 text-xs text-slate-900 placeholder-slate-400 outline-none focus:bg-white focus:border-blue-600 transition-all"
         />
-
       </div>
 
       {/* Right Side */}
-      <div className="flex items-center gap-6">
-
+      <div className="flex items-center gap-5">
         {/* Notification */}
-        <button className="relative">
-
-          <Bell
-            size={22}
-            className="text-gray-300 hover:text-white transition"
-          />
-
-          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-500"></span>
-
+        <button className="relative p-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 transition-all">
+          <Bell size={18} />
+          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-blue-600 ring-2 ring-white"></span>
         </button>
 
         {/* User */}
         <div className="flex items-center gap-3">
-
-          <div className="w-11 h-11 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-lg shadow-md">
-
+          <div className="w-10 h-10 rounded-full bg-blue-600 text-white font-bold text-base flex items-center justify-center shadow-md shadow-blue-500/20">
             {initials}
-
           </div>
-
-          <div>
-
-            <h3 className="text-white font-semibold">
+          <div className="hidden sm:block text-left">
+            <h3 className="text-xs font-bold text-slate-900">
               {displayName}
             </h3>
-
-            <p className="text-sm text-gray-400 capitalize">
-              {role}
+            <p className="text-[11px] text-slate-500 font-medium capitalize">
+              {role} Account
             </p>
-
           </div>
-
         </div>
 
         {/* Logout */}
         <button
           onClick={onLogout}
-          className="flex items-center gap-2 bg-red-600 hover:bg-red-700 transition-all duration-300 px-4 py-2 rounded-xl text-white shadow-md"
+          className="flex items-center gap-1.5 bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-700 font-semibold px-3.5 py-2 rounded-xl text-xs border border-slate-200 hover:border-red-200 transition-all"
         >
-
-          <LogOut size={18} />
-
-          Logout
-
+          <LogOut size={14} />
+          <span>Logout</span>
         </button>
-
       </div>
-
     </header>
   );
 }

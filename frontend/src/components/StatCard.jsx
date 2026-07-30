@@ -8,53 +8,35 @@ export default function StatCard({
   color = "#2563EB",
 }) {
   return (
-    <div className="bg-[#171B22] border border-[#2B3140] rounded-2xl p-6 shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-
+    <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
       <div className="flex items-center justify-between">
-
         <div>
-
-          <p className="text-gray-400 text-sm">
+          <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">
             {title}
           </p>
 
-          <h2 className="text-white text-3xl font-bold mt-2">
+          <h2 className="text-slate-900 text-3xl font-extrabold font-mono mt-1">
             {value}
           </h2>
 
-          <div className="flex items-center gap-2 mt-4">
-
-            <TrendingUp
-              size={16}
-              className="text-green-500"
-            />
-
-            <span className="text-green-500 text-sm">
-              +12% this month
+          <div className="flex items-center gap-1.5 mt-3">
+            <TrendingUp size={14} className="text-emerald-600" />
+            <span className="text-emerald-600 text-xs font-semibold">
+              +12% this term
             </span>
-
           </div>
-
         </div>
 
         <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center"
+          className="w-14 h-14 rounded-2xl flex items-center justify-center border"
           style={{
-            background: `${color}20`,
+            backgroundColor: `${color}10`,
+            borderColor: `${color}30`,
           }}
         >
-
-          {Icon && (
-            <Icon
-              size={30}
-              color={color}
-            />
-          )}
-
+          {Icon && <Icon size={26} color={color} />}
         </div>
-
       </div>
-
     </div>
   );
 }

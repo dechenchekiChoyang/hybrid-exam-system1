@@ -1,23 +1,16 @@
 import React from "react";
 
-const COLORS = {
-  surface: "#171B22",
-  border: "#2B3140",
-};
-
 export default function Card({
   children,
   className = "",
   style = {},
+  onClick,
 }) {
   return (
     <div
-      className={`rounded-2xl shadow-lg ${className}`}
-      style={{
-        background: COLORS.surface,
-        border: `1px solid ${COLORS.border}`,
-        ...style,
-      }}
+      onClick={onClick}
+      className={`rounded-2xl bg-white border border-slate-200 shadow-sm transition-all duration-200 ${className}`}
+      style={style}
     >
       {children}
     </div>

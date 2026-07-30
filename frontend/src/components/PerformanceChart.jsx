@@ -21,38 +21,27 @@ const data = [
 export default function PerformanceChart() {
   return (
     <Card className="p-6">
-
-      <h2 className="text-white text-xl font-bold mb-6">
-        Performance Overview
+      <h2 className="text-slate-900 text-lg font-bold mb-4">
+        Academic Performance Overview
       </h2>
 
-      <div style={{ width: "100%", height: 300 }}>
-
+      <div style={{ width: "100%", height: 280 }}>
         <ResponsiveContainer>
-
           <LineChart data={data}>
-
-            <CartesianGrid stroke="#2B3140" />
-
-            <XAxis dataKey="exam" stroke="#8A93A6" />
-
-            <YAxis stroke="#8A93A6" />
-
-            <Tooltip />
-
+            <CartesianGrid stroke="#E2E8F0" strokeDasharray="3 3" />
+            <XAxis dataKey="exam" stroke="#64748B" />
+            <YAxis stroke="#64748B" />
+            <Tooltip contentStyle={{ backgroundColor: '#FFFFFF', borderColor: '#CBD5E1', borderRadius: '8px' }} />
             <Line
               type="monotone"
               dataKey="score"
               stroke="#2563EB"
               strokeWidth={3}
+              dot={{ fill: '#2563EB', r: 4 }}
             />
-
           </LineChart>
-
         </ResponsiveContainer>
-
       </div>
-
     </Card>
   );
 }

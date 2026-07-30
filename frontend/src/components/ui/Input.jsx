@@ -1,12 +1,5 @@
 import React, { useState } from "react";
 
-const COLORS = {
-  border: "#374151",
-  focus: "#2563EB",
-  bg: "#111827",
-  text: "#ffffff",
-};
-
 export default function Input({
   label,
   required = false,
@@ -14,25 +7,16 @@ export default function Input({
   value,
   onChange,
   placeholder = "",
+  className = "",
 }) {
   const [focus, setFocus] = useState(false);
 
   return (
-    <div className="mb-5">
-
+    <div className={`mb-4 ${className}`}>
       {label && (
-        <label
-          className="block mb-2 text-sm font-semibold"
-          style={{ color: "#ffffff" }}
-        >
+        <label className="block mb-1.5 text-xs font-semibold text-slate-700">
           {label}
-
-          {required && (
-            <span style={{ color: "#ef4444" }}>
-              {" "}
-              *
-            </span>
-          )}
+          {required && <span className="text-red-500 ml-0.5">*</span>}
         </label>
       )}
 
@@ -43,16 +27,10 @@ export default function Input({
         placeholder={placeholder}
         onFocus={() => setFocus(true)}
         onBlur={() => setFocus(false)}
-        className="w-full h-12 rounded-xl px-4 outline-none transition-all duration-300"
-        style={{
-          background: COLORS.bg,
-          color: COLORS.text,
-          border: focus
-            ? `1px solid ${COLORS.focus}`
-            : `1px solid ${COLORS.border}`,
-        }}
+        className={`w-full h-10 rounded-lg px-3.5 text-sm bg-slate-50 text-slate-900 border outline-none transition-all ${
+          focus ? "border-blue-600 bg-white ring-2 ring-blue-500/10" : "border-slate-300"
+        }`}
       />
-
     </div>
   );
 }
