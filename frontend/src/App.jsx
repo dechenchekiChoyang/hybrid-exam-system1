@@ -683,7 +683,7 @@ function RoleLoginScreen({ role, onLogin, onBack, onGoToRegister }) {
 
     try {
       setLoading(true);
-      const res = await API.post("/login", { email, password, role });
+      const res = await API.post("/api/auth/login", { email, password, role });
       const userToSave = {
         name: res.data.user.fullName,
         email: res.data.user.email,
@@ -781,7 +781,7 @@ function StudentRegisterScreen({ onRegistered, onBack, onGoToLogin }) {
     if (form.password !== form.confirmPassword) { setError("Passwords do not match."); return; }
     setLoading(true);
     try {
-      await API.post("/register", {
+      await API.post("/api/auth/register", {
         fullName: form.name.trim(),
         email: form.email.trim(),
         password: form.password,
@@ -2723,7 +2723,7 @@ function AdminDashboard({ user, submission, onLogout }) {
     }
     try {
       setLoading(true);
-      const res = await API.post("/create-staff", staffForm);
+      const res = await API.post("/api/auth/create-staff", staffForm);
       setMsg({ text: res.data.message || "Staff account created successfully!", isError: false });
       setStaffForm({ fullName: "", email: "", password: "", role: "instructor", department: "Computer Science" });
     } catch (err) {
