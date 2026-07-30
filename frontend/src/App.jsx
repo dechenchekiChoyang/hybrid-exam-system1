@@ -184,7 +184,7 @@ function useServerCountdown(examId, fallbackSeconds, active, onExpire) {
       try {
         let res;
         try {
-          res = await API.get(`/submissions/${examId}/timer`);
+          res = await API.get(`/api/submissions/${examId}/timer`);
           if (res.data?.status && res.data.status !== "in-progress") {
             setSecondsLeft(0);
             setTimerLoading(false);
