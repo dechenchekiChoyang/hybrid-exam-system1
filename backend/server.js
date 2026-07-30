@@ -21,6 +21,8 @@ app.set("trust proxy", 1);
 app.use(helmet());
 const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
 const allowedOrigins = clientUrl.split(',').map(url => url.trim());
+console.log("CLIENT_URL:", process.env.CLIENT_URL);
+console.log("Allowed Origins:", allowedOrigins);
 
 app.use(cors({
   origin: (origin, callback) => {
