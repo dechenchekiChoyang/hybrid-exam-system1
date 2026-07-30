@@ -3204,7 +3204,7 @@ export default function App() {
 
   const handleDeleteQuestion = async (examId, questionId) => {
     try {
-      await API.delete(`/exams/${examId}/questions/${questionId}`);
+      await API.delete(`/api/exams/${examId}/questions/${questionId}`);
       await fetchQuestions(examId);
     } catch (err) {
       alert(err.response?.data?.message || "Failed to delete question.");
