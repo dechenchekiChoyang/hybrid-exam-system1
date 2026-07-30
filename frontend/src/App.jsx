@@ -3144,7 +3144,7 @@ export default function App() {
   const handleDeleteExam = async (examId) => {
     setDeleting(true);
     try {
-      await API.delete(`api/exams/${examId}`);
+      await API.delete(`/api/exams/${examId}`);
       setDeleteConfirm({ open: false, examId: null, title: "" });
       await fetchExams();
     } catch (err) {
@@ -3179,7 +3179,7 @@ export default function App() {
   const handleCreateQuestion = async (examId, formData) => {
     setQuestionSaving(true);
     try {
-      await API.post(`/exams/${examId}/questions`, formData);
+      await API.post(`/api/exams/${examId}/questions`, formData);
       setQuestionModal({ open: false, mode: "create", examId: null, question: null });
       await fetchQuestions(examId);
     } catch (err) {
