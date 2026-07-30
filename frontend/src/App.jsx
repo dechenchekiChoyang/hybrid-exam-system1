@@ -3192,7 +3192,7 @@ export default function App() {
   const handleUpdateQuestion = async (examId, questionId, formData) => {
     setQuestionSaving(true);
     try {
-      await API.put(`/exams/${examId}/questions/${questionId}`, formData);
+      await API.put(`/api/exams/${examId}/questions/${questionId}`, formData);
       setQuestionModal({ open: false, mode: "edit", examId: null, question: null });
       await fetchQuestions(examId);
     } catch (err) {
