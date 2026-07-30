@@ -3144,7 +3144,7 @@ export default function App() {
   const handleDeleteExam = async (examId) => {
     setDeleting(true);
     try {
-      await API.delete(`/exams/${examId}`);
+      await API.delete(`api/exams/${examId}`);
       setDeleteConfirm({ open: false, examId: null, title: "" });
       await fetchExams();
     } catch (err) {
